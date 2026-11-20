@@ -1,7 +1,7 @@
 import * as T from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
-import { office, settings, shifts, type Point, type Round } from "./round";
+import { furniture, nearStation, office, settings, shifts, type Point, type Round } from "./round";
 import type { Sound } from "./sound";
 
 const colours = {
@@ -455,7 +455,7 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
   inbox.position.set(office.tray.x, 0, office.tray.z);
   scene.add(inbox);
   for (const x of [-1.45, 1.45]) for (const z of [-.55, .55]) cylinder(inbox, colours.trayLeg, x, .34, z, .08, .68);
-  const trayTop = rbox(inbox, colours.tray, 0, .74, 0, 3.3, .14, 1.5, .07, true);
+  const trayTop = rbox(inbox, colours.tray, 0, .74, 0, furniture.inbox.w, .14, furniture.inbox.d, .07, true);
   for (const [x, z, w, d] of [[0, .7, 3.2, .08], [0, -.7, 3.2, .08], [1.6, 0, .08, 1.4], [-1.6, 0, .08, 1.4]]) {
     rbox(inbox, 0x8db3f5, x, .87, z, w, .16, d, .035);
   }
@@ -467,7 +467,7 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
   const desk = new T.Group();
   desk.position.set(office.desk.x, 0, office.desk.z);
   scene.add(desk);
-  const deskTop = rbox(desk, colours.deskTop, 0, .84, 0, 3.5, .14, 1.2, .06, true);
+  const deskTop = rbox(desk, colours.deskTop, 0, .84, 0, furniture.desk.w, .14, furniture.desk.d, .06, true);
   for (const x of [-1.25, 1.25]) {
     rbox(desk, colours.desk, x, .39, 0, .82, .78, 1.06, .08);
     for (const y of [.58, .26]) {
@@ -520,10 +520,10 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
   ball(stamp, colours.stampRed, 0, .4, 0, .15, .13, .15);
 
   // Decorations
-  for (const [x, z, s] of [[-9.05, -4.75, 1], [9.05, -4.75, 1.1], [9.1, 4.75, .9]]) {
+  for (const { x, z, size } of furniture.plants) {
     const plant = new T.Group();
     plant.position.set(x, 0, z);
-    plant.scale.setScalar(s);
+    plant.scale.setScalar(size);
     scene.add(plant);
     cylinder(plant, colours.pot, 0, .28, 0, .34, .56);
     cylinder(plant, 0xff8a63, 0, .58, 0, .38, .1);
@@ -532,7 +532,7 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
     ball(plant, colours.leaf, -.18, 1.25, -.08, .26);
   }
   const cooler = new T.Group();
-  cooler.position.set(-9.05, 0, 4.7);
+  cooler.position.set(furniture.cooler.x, 0, furniture.cooler.z);
   scene.add(cooler);
   rbox(cooler, 0xe9eef7, 0, .45, 0, .6, .9, .6, .1);
   const water = new T.MeshStandardMaterial({ color: 0x8fd6ff, roughness: .1, transparent: true, opacity: .75 });
@@ -541,14 +541,14 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
   rbox(cooler, 0x5aa6d0, -.12, .7, .31, .08, .1, .06, .03);
   rbox(cooler, colours.stampRed, .12, .7, .31, .08, .1, .06, .03);
   const cabinet = new T.Group();
-  cabinet.position.set(9.15, 0, -2.4);
+  cabinet.position.set(furniture.cabinet.x, 0, furniture.cabinet.z);
   scene.add(cabinet);
   rbox(cabinet, 0xb6a3e8, 0, .6, 0, .7, 1.2, .8, .08);
   for (const y of [.3, .65, 1.0]) rbox(cabinet, 0xd2c5f5, -.36, y, 0, .04, .26, .6, .02).castShadow = false;
 
   // A coffee corner, a printer and a beanbag
   const coffee = new T.Group();
-  coffee.position.set(9.1, 0, -.95);
+  coffee.position.set(furniture.coffee.x, 0, furniture.coffee.z);
   scene.add(coffee);
   rbox(coffee, 0xf6c995, 0, .45, 0, .7, .9, 1.3, .08);
   rbox(coffee, colours.ink, 0, 1.12, -.2, .5, .45, .45, .08);
@@ -556,16 +556,17 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
   ball(coffee, colours.stampRed, -.27, 1.26, -.05, .03, .03, .02, false);
   for (const [z, colour] of [[.25, colours.white], [.45, 0xff9fb4]] as const) cylinder(coffee, colour, 0, 1.0, z, .08, .16);
   const printer = new T.Group();
-  printer.position.set(-9.1, 0, -2.1);
+  printer.position.set(furniture.printer.x, 0, furniture.printer.z);
   scene.add(printer);
   rbox(printer, 0xe9eef7, 0, .4, 0, .75, .8, .9, .08);
   rbox(printer, 0xd0d8e8, 0, .86, 0, .7, .14, .8, .06);
   rbox(printer, colours.white, .2, .95, 0, .3, .04, .5, .01).castShadow = false;
   ball(printer, 0x5fe39a, -.39, .7, .3, .035, .035, .02, false);
-  ball(scene, 0xff9fb4, 7.6, .32, 4.25, .62, .34, .58);
-  ball(scene, 0xffb8c8, 7.6, .52, 4.05, .4, .2, .3);
+  const { beanbag, lamp: lampSpot } = furniture;
+  ball(scene, 0xff9fb4, beanbag.x, .32, beanbag.z, .62, .34, .58);
+  ball(scene, 0xffb8c8, beanbag.x, .52, beanbag.z - .2, .4, .2, .3);
   const floorLamp = new T.Group();
-  floorLamp.position.set(9.05, 0, 3.3);
+  floorLamp.position.set(lampSpot.x, 0, lampSpot.z);
   scene.add(floorLamp);
   cylinder(floorLamp, colours.ink, 0, .04, 0, .25, .08);
   cylinder(floorLamp, colours.ink, 0, .8, 0, .03, 1.5);
@@ -1032,13 +1033,13 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
       round.players.forEach(player => {
         const { position, carrying } = player;
         if (!carrying) {
-          if (near(position, office.tray) && round.requests.some(card => card.at.place === "tray")) lit.tray = true;
+          if (nearStation(position, furniture.inbox) && round.requests.some(card => card.at.place === "tray")) lit.tray = true;
           office.pass.forEach((pad, i) => {
             if (near(position, pad) && round.requests.some(card => card.at.place === "counter" && card.at.pad === i)) lit.pads[i] = true;
           });
           return;
         }
-        if (!carrying.approved && near(position, office.desk)) lit.desk = true;
+        if (!carrying.approved && nearStation(position, furniture.desk)) lit.desk = true;
         const free = office.pass.map((pad, i) => ({ i, d: Math.hypot(pad.x - position.x, pad.z - position.z) }))
           .filter(({ i, d }) => d <= settings.reach && !round.requests.some(card => card.at.place === "counter" && card.at.pad === i))
           .sort((a, b) => a.d - b.d)[0];

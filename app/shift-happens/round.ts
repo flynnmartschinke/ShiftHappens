@@ -12,6 +12,10 @@ export const settings = {
   rushSpawnEvery: 2.5,
   speed: 6.4,
   reach: 1.45,
+  /** How far from the edge of the inbox or desk a player can still use it. */
+  stationReach: 1,
+  /** Collision radius of a player, close to the size of the drawn critters. */
+  body: .42,
 };
 
 export type Point = { x: number; z: number };
@@ -25,6 +29,40 @@ export const office = {
   boardZ: -4.35,
   pass: [-4.7, -2.6, -.5, 1.6].map(x => ({ x, z: 0 })),
 };
+
+/** A solid piece of furniture: centre plus full width (x) and depth (z). */
+export type Block = Point & { w: number; d: number };
+
+// The 3D office draws each piece at these positions and sizes.
+export const furniture = {
+  inbox: { ...office.tray, w: 3.3, d: 1.5 },
+  desk: { ...office.desk, w: 3.5, d: 1.2 },
+  plants: [{ x: -9.05, z: -4.75, size: 1 }, { x: 9.05, z: -4.75, size: 1.1 }, { x: 9.1, z: 4.75, size: .9 }]
+    .map(({ x, z, size }) => ({ x, z, w: .8 * size, d: .8 * size, size })),
+  cooler: { x: -9.05, z: 4.7, w: .6, d: .6 },
+  cabinet: { x: 9.15, z: -2.4, w: .7, d: .8 },
+  coffee: { x: 9.1, z: -.95, w: .7, d: 1.3 },
+  printer: { x: -9.1, z: -2.1, w: .75, d: .9 },
+  beanbag: { x: 7.6, z: 4.25, w: 1.15, d: 1.05 },
+  lamp: { x: 9.05, z: 3.3, w: .5, d: .5 },
+};
+
+const blocks: Block[] = [
+  furniture.inbox, furniture.desk, ...furniture.plants, furniture.cooler, furniture.cabinet,
+  furniture.coffee, furniture.printer, furniture.beanbag, furniture.lamp,
+];
+
+/** Distance from a point to the nearest edge of a block (0 when inside it). */
+function edgeDistance(point: Point, block: Block) {
+  const dx = Math.max(0, Math.abs(point.x - block.x) - block.w / 2);
+  const dz = Math.max(0, Math.abs(point.z - block.z) - block.d / 2);
+  return Math.hypot(dx, dz);
+}
+
+/** Whether a player at this point can use the inbox or the desk. */
+export function nearStation(point: Point, station: Block) {
+  return edgeDistance(point, station) <= settings.stationReach;
+}
 
 type CardLocation =
   | { place: "tray" | "board" }
@@ -84,16 +122,12 @@ export function beginRound(round: Round) {
   round.nextSpawn = settings.spawnEvery;
 }
 
-function near(a: Point, b: Point, reach = settings.reach) {
-  return Math.hypot(a.x - b.x, a.z - b.z) <= reach;
-}
-
 function atBoard(point: Point) {
   return point.z <= office.boardZ + settings.reach && Math.abs(point.x) <= 7.8;
 }
 
 function atDesk(point: Point) {
-  return near(point, office.desk);
+  return nearStation(point, furniture.desk);
 }
 
 function notify(round: Round, player: Player, message: string) {
@@ -133,10 +167,11 @@ export function stepRound(round: Round, seconds: number) {
 }
 
 function walkable(point: Point) {
-  const body = .28;
+  const { body } = settings;
   return Math.abs(point.x) <= office.bounds.x
     && Math.abs(point.z) <= office.bounds.z
-    && (point.x > office.counterRight + body || Math.abs(point.z) > office.counterDepth + body);
+    && (point.x > office.counterRight + body || Math.abs(point.z) > office.counterDepth + body)
+    && blocks.every(block => edgeDistance(point, block) >= body);
 }
 
 export function walk(round: Round, index: number, dx: number, dz: number, seconds: number) {
@@ -162,12 +197,13 @@ export function walk(round: Round, index: number, dx: number, dz: number, second
 
 function cardInReach(round: Round, point: Point) {
   return round.requests.map(card => {
+    // The inbox is in reach anywhere along its edge; loose cards are measured from their centre.
+    if (card.at.place === "tray") return { card, distance: edgeDistance(point, furniture.inbox), reach: settings.stationReach };
     let target: Point | undefined;
     if (card.at.place === "counter") target = office.pass[card.at.pad];
     if (card.at.place === "floor") target = card.at.point;
-    if (card.at.place === "tray") target = office.tray;
-    return { card, distance: target && Math.hypot(point.x - target.x, point.z - target.z) };
-  }).filter(entry => entry.distance !== undefined && entry.distance <= settings.reach)
+    return { card, distance: target && Math.hypot(point.x - target.x, point.z - target.z), reach: settings.reach };
+  }).filter(entry => entry.distance !== undefined && entry.distance <= entry.reach)
     .sort((a, b) => (a.distance ?? Infinity) - (b.distance ?? Infinity))[0]?.card;
 }
 
