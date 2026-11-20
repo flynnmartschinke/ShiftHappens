@@ -3,9 +3,11 @@
 import { useEffect, useEffectEvent, useRef, useState, type CSSProperties, type PointerEvent } from "react";
 import { createOfficeWorld } from "./office-world";
 import {
-  beginRound, days, filledShifts, interact, newRound, nextAction, roleOf, roster, settings, shifts, stepRound, stopStamp, walk,
-  type Round,
+  beginRound, dayRange, days, filledShifts, interact, neededShifts, newRound, nextAction, roleOf, roster, sampleTeam,
+  settings, shifts, stepRound, stopStamp, walk,
+  type Role, type Round, type Team,
 } from "./round";
+import { copyTeam, loadTeam, saveTeam, TeamSetup } from "./team-setup";
 import { PlayQr, playUrl } from "./play-qr";
 import { createSound, type Sound } from "./sound";
 
@@ -28,10 +30,14 @@ function snapshot(round: Round) {
     phase: round.phase,
     time: settings.duration - round.elapsed,
     filled: filledShifts(round),
+    needed: neededShifts(round),
+    week: round.week,
+    custom: round.custom,
     slots: roster(round).map(person => person?.name ?? ""),
     news: round.news.until > round.elapsed ? round.news.text : "",
     players: round.players.map((player, i) => ({
       carrying: player.carrying ? player.carrying.name : "",
+      works: player.carrying ? dayRange(player.carrying.days.map((on, day) => on && !player.carrying!.off[day])) : "",
       colour: player.carrying ? roleOf(player.carrying.role).colour : "",
       approved: player.carrying?.approved ?? false,
       stamp: player.stamping ? (player.carrying?.stamp ?? 0) / settings.stampTime : 0,
@@ -41,13 +47,13 @@ function snapshot(round: Round) {
   };
 }
 
-function rosterText(slots: string[]) {
-  const line = (day: number) => [day, day + days.length]
-    .map(slot => `${shifts[slot].half} ${roleOf(shifts[slot].role).label}: ${slots[slot] || "open"}`).join(" · ");
+function rosterText(slots: string[], week: (Role | null)[]) {
+  const line = (day: number) => [day, day + days.length].filter(slot => week[slot])
+    .map(slot => `${shifts[slot].half} ${roleOf(week[slot]!).label}: ${slots[slot] || "open"}`).join(" · ") || "closed";
   return ["Shift Happens! roster", ...days.map((day, i) => `${day}  ${line(i)}`)].join("\n");
 }
 
-function RosterTable({ slots }: { slots: string[] }) {
+function RosterTable({ slots, week }: { slots: string[]; week: (Role | null)[] }) {
   return (
     <table className="shifts-roster">
       <thead><tr><th scope="col"><span className="sr-only">Shift</span></th>{days.map(day => <th key={day} scope="col">{day}</th>)}</tr></thead>
@@ -57,7 +63,9 @@ function RosterTable({ slots }: { slots: string[] }) {
             <th scope="row">{half}</th>
             {days.map((day, i) => {
               const slot = i + row * days.length;
-              const { colour, label } = roleOf(shifts[slot].role);
+              const role = week[slot];
+              if (!role) return <td key={day} data-closed="true" title="Not needed">–</td>;
+              const { colour, label } = roleOf(role);
               return (
                 <td key={day} data-open={!slots[slot]} style={{ "--role": colour } as CSSProperties} title={label}>
                   {slots[slot] || "—"}
@@ -88,9 +96,17 @@ export default function ShiftHappens() {
   const [graphics, setGraphics] = useState<"loading" | "ready" | "failed">("loading");
   const [muted, setMuted] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [team, setTeam] = useState<Team>(() => copyTeam(sampleTeam));
+  const [setup, setSetup] = useState(false);
+  const lastMode = useRef<"quick" | "real">("quick");
 
-  function copyRoster(slots: string[]) {
-    navigator.clipboard?.writeText(rosterText(slots)).then(() => setCopied(true), () => setCopied(false));
+  function copyRoster(slots: string[], week: (Role | null)[]) {
+    navigator.clipboard?.writeText(rosterText(slots, week)).then(() => setCopied(true), () => setCopied(false));
+  }
+
+  function changeTeam(next: Team) {
+    setTeam(next);
+    saveTeam(next);
   }
 
   function press(code: string) {
@@ -140,8 +156,9 @@ export default function ShiftHappens() {
     const effects = createSound();
     sound.current = effects;
     if (window.matchMedia("(pointer: coarse)").matches) focus.current = 0;
-    // Sync the saved preference after mount, so server and client render the same markup first.
+    // Sync saved settings after mount, so server and client render the same markup first.
     setMuted(effects.muted);
+    setTeam(loadTeam());
     let world: ReturnType<typeof createOfficeWorld> | undefined;
     let frame: number;
     let previous = performance.now();
@@ -220,7 +237,9 @@ export default function ShiftHappens() {
     };
   }, []);
 
-  function start() {
+  function start(mode: "quick" | "real" = lastMode.current) {
+    lastMode.current = mode;
+    setSetup(false);
     sound.current?.unlock();
     keys.current.clear();
     holding.current.clear();
@@ -228,7 +247,9 @@ export default function ShiftHappens() {
     if (focus.current !== null) focus.current = 0;
     setLead(0);
     setCopied(false);
-    const state = newRound();
+    const state = mode === "real"
+      ? newRound({ ...team, people: team.people.filter(person => person.name.trim()).map(person => ({ ...person, name: person.name.trim() })) }, true)
+      : newRound();
     beginRound(state);
     round.current = state;
     setView(snapshot(state));
@@ -289,7 +310,7 @@ export default function ShiftHappens() {
       <header className="shifts-head">
         <h1>Shift Happens<span>!</span></h1>
         <div className="shifts-score" aria-label="Round score">
-          <span><small>Covered</small><strong>{view.filled}<i> / {shifts.length}</i></strong></span>
+          <span><small>Covered</small><strong>{view.filled}<i> / {view.needed}</i></strong></span>
           <span className={urgent ? "shifts-urgent" : undefined}>
             <small>Time left</small><strong>{clock(view.time)}</strong>
           </span>
@@ -303,7 +324,9 @@ export default function ShiftHappens() {
           <div className="shifts-day" key={day}>
             <b>{day}</b>
             {([i, i + days.length]).map(index => {
-              const { colour, label } = roleOf(shifts[index].role);
+              const role = view.week[index];
+              if (!role) return <span key={index} data-closed="true" aria-label={`${shifts[index].label}: closed`}><span>{shifts[index].half}</span><em>–</em></span>;
+              const { colour, label } = roleOf(role);
               const name = view.slots[index];
               return (
                 <span key={index} data-filled={Boolean(name)} style={{ "--role": colour } as CSSProperties}
@@ -333,7 +356,7 @@ export default function ShiftHappens() {
                 <small>Swap</small>
               </button>
               {solo.carrying && (
-                <b className="shifts-person" style={{ "--role": solo.colour } as CSSProperties}>{solo.carrying}{solo.approved ? " ✓" : ""}</b>
+                <b className="shifts-person" style={{ "--role": solo.colour } as CSSProperties}>{solo.carrying}{solo.approved ? " ✓" : ""} · {solo.works}</b>
               )}
               <button type="button" onPointerDown={actionDown} onLostPointerCapture={() => release("Space")}
                 onPointerUp={() => release("Space")}>
@@ -343,16 +366,21 @@ export default function ShiftHappens() {
           </div>
         )}
         {(view.phase !== "playing" || graphics === "failed") && (
-          <div className="shifts-overlay">
+          <div className={setup ? "shifts-overlay shifts-overlay--setup" : "shifts-overlay"}>
             <div>
               {graphics === "failed" ? (
                 <><h2>Office couldn’t load</h2><p>Open this game in a browser with WebGL 2 enabled.</p></>
+              ) : setup ? (
+                <TeamSetup team={team} onChange={changeTeam} onPlay={() => start("real")} onBack={() => setSetup(false)} />
               ) : view.phase === "ready" ? (
                 <>
                   <h2>Cover the week</h2>
-                  <p>New staff are waiting. Sign them on at the manager’s desk, pass them over the counter and put each one on a shift that matches their role. Watch out for sick calls.</p>
+                  <p>Staff are waiting. Sign them on at the manager’s desk, pass them over the counter and roster each one onto a shift that matches their role, on a day they can work. Watch out for sick calls.</p>
                   <p className="shifts-tip">Playing alone? Swap between the duck and the bunny with <kbd>Q</kbd> or the swap button.</p>
-                  <button disabled={graphics !== "ready"} onClick={start}>Start round</button>
+                  <div className="shifts-end-actions">
+                    <button disabled={graphics !== "ready"} onClick={() => start("quick")}>Quick play</button>
+                    <button type="button" className="shifts-copy" disabled={graphics !== "ready"} onClick={() => setSetup(true)}>Run it for real</button>
+                  </div>
                   <div className="shifts-qr">
                     <PlayQr />
                     <p><strong>Play on your phone</strong>Scan to open {playUrl.replace("https://", "")}</p>
@@ -361,11 +389,12 @@ export default function ShiftHappens() {
               ) : (
                 <>
                   <h2>{view.phase === "won" ? "Week covered!" : "Understaffed"}</h2>
-                  <p>{view.phase === "won" ? `Rostered with ${clock(view.time)} to spare.` : `${view.filled} of ${shifts.length} shifts covered.`}</p>
-                  <RosterTable slots={view.slots} />
+                  <p>{view.phase === "won" ? `Rostered with ${clock(view.time)} to spare.` : `${view.filled} of ${view.needed} shifts covered.`}</p>
+                  <RosterTable slots={view.slots} week={view.week} />
                   <div className="shifts-end-actions">
-                    <button type="button" className="shifts-copy" onClick={() => copyRoster(view.slots)}>{copied ? "Copied" : "Copy roster"}</button>
-                    <button onClick={start}>Play again</button>
+                    <button type="button" className="shifts-copy" onClick={() => copyRoster(view.slots, view.week)}>{copied ? "Copied" : "Copy roster"}</button>
+                    {view.custom && <button type="button" className="shifts-copy" onClick={() => setSetup(true)}>Edit team</button>}
+                    <button onClick={() => start()}>Play again</button>
                   </div>
                 </>
               )}
@@ -389,7 +418,7 @@ export default function ShiftHappens() {
                 </div>
                 {view.phase === "playing" && (
                   <div className="shifts-prompt">
-                    {player.carrying && <span className="shifts-person" style={{ "--role": player.colour } as CSSProperties}>{player.carrying}{player.approved ? " ✓" : ""}</span>}
+                    {player.carrying && <span className="shifts-person" style={{ "--role": player.colour } as CSSProperties}>{player.carrying}{player.approved ? " ✓" : ""} · {player.works}</span>}
                     <span>{player.stamping ? "Stamping…" : player.prompt}</span>
                   </div>
                 )}
