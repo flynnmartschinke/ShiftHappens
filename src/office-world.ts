@@ -2,11 +2,9 @@ import * as T from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import {
-  canWork, columnX, furniture, nearStation, office, roleOf, roster, sampleTeam, settings, shifts,
-  type Point, type Role, type Round, type Staff,
+  canWork, columnX, furniture, nearStation, newRound, office, roleIn, roster, settings,
+  type Point, type Role, type Round, type Slot, type Staff,
 } from "./round";
-
-const sampleWeek = sampleTeam.week;
 import type { Sound } from "./sound";
 
 const colours = {
@@ -26,8 +24,9 @@ const boardY = 1.72;
 const boardZ = -5.36;
 const boardWidth = 15.4;
 const boardHeight = 1.95;
+// Fredoka tops out at 700; the page loads it before the office is drawn
 const font = (weight: number, size: number) =>
-  `${weight} ${size}px ui-rounded, "SF Pro Rounded", Nunito, "Avenir Next", system-ui, sans-serif`;
+  `${Math.min(700, weight)} ${size}px "Fredoka Variable", ui-rounded, "SF Pro Rounded", Nunito, system-ui, sans-serif`;
 
 type Kind = "duck" | "bunny";
 type Critter = ReturnType<typeof makeCritter>;
@@ -309,10 +308,24 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
 
   // Roster board
   rbox(scene, colours.frame, 0, boardY, boardZ - .04, boardWidth + .36, boardHeight + .36, .16, .1);
-  const slotOf = (index: number) => ({
-    x: columnX(index % 7),
-    y: boardY + (index < 7 ? .22 : -.5),
-  });
+  // Where each slot sits: one shift's places share its cell, side by side or in a 2 × 2 grid
+  type Spot = { x: number; y: number; w: number; h: number; compact: boolean };
+  let spots: Spot[] = [];
+  let boardRoles: Role[] = [];
+  function layOut(slots: Slot[]) {
+    return slots.map((slot, i) => {
+      const together = slots.filter(other => other.shift === slot.shift);
+      const n = together.length;
+      const k = together.indexOf(slots[i]);
+      const x = columnX(slot.shift % 7);
+      const y = boardY + (slot.shift < 7 ? .22 : -.5);
+      if (n === 1) return { x, y, w: .95, h: .62, compact: false };
+      if (n === 2) return { x: x + (k - .5) * .93, y, w: .88, h: .62, compact: false };
+      const row = Math.floor(k / 2);
+      const lone = n === 3 && k === 2;
+      return { x: lone ? x : x + (k % 2 - .5) * .93, y: y + (row ? -.16 : .16), w: .88, h: .29, compact: true };
+    });
+  }
   // The cork is painted once; the shift outlines are repainted when a round brings a different week
   const cork = document.createElement("canvas");
   cork.width = 2048;
@@ -330,10 +343,13 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
   const boardCanvas = boardTexture.image as HTMLCanvasElement;
   let paintedWeek = "";
 
-  function paintBoard(week: (Role | null)[]) {
-    const key = week.join(",");
+  function paintBoard({ slots, roles, shiftNames }: Pick<Round, "slots" | "roles" | "shiftNames">) {
+    const key = JSON.stringify([slots, roles, shiftNames]);
     if (key === paintedWeek) return;
     paintedWeek = key;
+    boardRoles = roles;
+    spots = layOut(slots);
+    placeSlots(slots);
     const pen = boardCanvas.getContext("2d")!;
     const sx = 2048 / boardWidth;
     const sy = 260 / boardHeight;
@@ -352,46 +368,58 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
       pen.font = font(900, 26);
       pen.fillText(day, x, py(boardY + .76) + 1);
     });
-    week.forEach((role, i) => {
-      const { x, y } = slotOf(i);
-      const colour = role ? roleOf(role).colour : "#9b8b7a";
-      pen.fillStyle = role ? `${colour}40` : "rgba(107,63,31,.12)";
+    // Shifts nobody is needed for
+    for (let shift = 0; shift < 14; shift++) {
+      if (slots.some(slot => slot.shift === shift)) continue;
+      const x = columnX(shift % 7);
+      const y = boardY + (shift < 7 ? .22 : -.5);
+      pen.fillStyle = "rgba(107,63,31,.12)";
       pen.beginPath();
       pen.roundRect(px(x - .47), py(y + .3), .94 * sx, .6 * sy, 12);
       pen.fill();
-      if (role) {
-        pen.setLineDash([12, 9]);
-        pen.lineWidth = 6;
-        pen.strokeStyle = colour;
-        pen.stroke();
-        pen.setLineDash([]);
-      }
-      pen.fillStyle = colour;
+      pen.fillStyle = "#9b8b7a";
       pen.font = font(900, 24);
-      pen.fillText(role ? roleOf(role).label.toUpperCase() : "CLOSED", px(x), py(y));
-      (slotGlows[i].material as T.MeshBasicMaterial).color.set(colour);
+      pen.fillText("CLOSED", px(x), py(y));
+    }
+    slots.forEach((slot, i) => {
+      const { x, y, w, h, compact } = spots[i];
+      const { colour, label } = roleIn(roles, slot.role);
+      pen.fillStyle = `${colour}40`;
+      pen.beginPath();
+      pen.roundRect(px(x - w / 2), py(y + h / 2), w * sx, h * sy, compact ? 8 : 12);
+      pen.fill();
+      pen.setLineDash(compact ? [8, 6] : [12, 9]);
+      pen.lineWidth = compact ? 4 : 6;
+      pen.strokeStyle = colour;
+      pen.stroke();
+      pen.setLineDash([]);
+      pen.fillStyle = colour;
+      pen.font = font(900, compact ? 18 : 24);
+      pen.fillText(label.toUpperCase(), px(x), py(y) + 1, w * sx - 12);
     });
-    pen.font = font(900, 30);
+    // Shift names in the margin left of Monday
+    pen.font = font(900, shiftNames.some(name => name.length > 2) ? 19 : 26);
     pen.fillStyle = "#6b3f1f";
-    pen.fillText("AM", px(-7.15), py(boardY + .22));
-    pen.fillText("PM", px(-7.15), py(boardY - .5));
+    pen.fillText(shiftNames[0].toUpperCase(), px(-7.4), py(boardY + .22), 66);
+    pen.fillText(shiftNames[1].toUpperCase(), px(-7.4), py(boardY - .5), 66);
     boardTexture.needsUpdate = true;
   }
   face(scene, boardTexture, 0, boardY, boardZ + .05, boardWidth, boardHeight);
   const slotGlowGeometry = new RoundedBoxGeometry(1.08, .74, .02, 2, .08);
   geometries.push(slotGlowGeometry);
   // Open shifts glow in their role colour while someone carries a signed-on person who can take them
-  const slotGlows = shifts.map((_, index) => {
-    const surface = new T.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .8, toneMapped: false });
-    ownMaterials.push(surface);
-    const mesh = new T.Mesh(slotGlowGeometry, surface);
-    const { x, y } = slotOf(index);
-    mesh.position.set(x, y, boardZ + .085);
-    mesh.visible = false;
-    scene.add(mesh);
-    return mesh;
-  });
-  paintBoard(sampleWeek);
+  const slotGlows: T.Mesh[] = [];
+  function glowFor(index: number) {
+    while (slotGlows.length <= index) {
+      const surface = new T.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: .8, toneMapped: false });
+      ownMaterials.push(surface);
+      const mesh = new T.Mesh(slotGlowGeometry, surface);
+      mesh.visible = false;
+      scene.add(mesh);
+      slotGlows.push(mesh);
+    }
+    return slotGlows[index];
+  }
 
   // Wall clock that follows the round timer, and a poster
   const clock = new T.Group();
@@ -617,19 +645,35 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
   ball(handset, 0xff5c74, .22, .02, 0, .07, .06, .08);
   let ringUntil = 0;
 
-  // Rostered people show as name badges on the board
+  // Rostered people show as name badges on the board, smaller when a shift needs three or four people
   const cardBody = new RoundedBoxGeometry(.95, .62, .05, 2, .035);
   const cardFace = new T.PlaneGeometry(.9, .57);
-  geometries.push(cardBody, cardFace);
+  const smallBody = new RoundedBoxGeometry(.88, .29, .05, 2, .03);
+  const smallFace = new T.PlaneGeometry(.84, .26);
+  geometries.push(cardBody, cardFace, smallBody, smallFace);
   const cardPaper = parts.material(colours.white, .8);
   const badgeTextures = new Map<string, T.Texture>();
 
-  function badgeTexture(person: Staff) {
-    const key = `${person.name}|${person.role}`;
+  function badgeTexture(person: Staff, compact: boolean) {
+    const { colour, label } = roleIn(boardRoles, person.role);
+    const key = `${person.name}|${colour}|${label}|${compact}`;
     const cached = badgeTextures.get(key);
     if (cached) return cached;
-    const { colour, label } = roleOf(person.role);
-    const texture = paint(256, 162, pen => {
+    const texture = compact ? paint(256, 80, pen => {
+      pen.fillStyle = "#fffdf8";
+      pen.beginPath();
+      pen.roundRect(0, 0, 256, 80, 14);
+      pen.fill();
+      pen.fillStyle = colour;
+      pen.beginPath();
+      pen.roundRect(0, 0, 34, 80, [14, 0, 0, 14]);
+      pen.fill();
+      pen.fillStyle = "#24324a";
+      pen.font = font(900, 46);
+      pen.textAlign = "center";
+      pen.textBaseline = "middle";
+      pen.fillText(person.name, 145, 43, 206);
+    }) : paint(256, 162, pen => {
       pen.fillStyle = "#fffdf8";
       pen.beginPath();
       pen.roundRect(0, 0, 256, 162, 18);
@@ -651,7 +695,12 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
     return texture;
   }
 
-  const badges = shifts.map((_, slot) => {
+  type Badge = {
+    group: T.Group; inner: T.Group; body: T.Mesh; front: T.Mesh; surface: T.MeshStandardMaterial;
+    tilt: number; compact: boolean; person: number; popped: number; falling: number; home: T.Vector3;
+  };
+  const badges: Badge[] = [];
+  function makeBadge(index: number): Badge {
     const group = new T.Group();
     group.visible = false;
     const inner = new T.Group();
@@ -666,11 +715,32 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
     inner.add(front);
     ball(inner, colours.stampRed, 0, .25, .06, .055, .055, .055, false, .3);
     scene.add(group);
-    const { x, y } = slotOf(slot);
-    group.position.set(x, y, boardZ + .16);
-    group.rotation.z = ((slot * 37 % 11) / 11 - .5) * .12;
-    return { group, inner, surface, person: -1, popped: -10, falling: -10, home: new T.Vector3(x, y, boardZ + .16) };
-  });
+    const tilt = ((index * 37 % 11) / 11 - .5) * .12;
+    return { group, inner, body: bodyMesh, front, surface, tilt, compact: false, person: -1, popped: -10, falling: -10, home: new T.Vector3() };
+  }
+
+  // Move badges and glows onto the current week's slots
+  function placeSlots(slots: Slot[]) {
+    spots.forEach((spot, i) => {
+      while (badges.length <= i) badges.push(makeBadge(badges.length));
+      const badge = badges[i];
+      badge.compact = spot.compact;
+      badge.body.geometry = spot.compact ? smallBody : cardBody;
+      badge.front.geometry = spot.compact ? smallFace : cardFace;
+      badge.front.position.z = .027;
+      badge.home.set(spot.x, spot.y, boardZ + .16);
+      badge.group.position.copy(badge.home);
+      badge.group.rotation.z = spot.compact ? badge.tilt * .4 : badge.tilt;
+      badge.person = -1;
+      const glow = glowFor(i);
+      glow.position.set(spot.x, spot.y, boardZ + .085);
+      glow.scale.set((spot.w + .13) / 1.08, (spot.h + .12) / .74, 1);
+      (glow.material as T.MeshBasicMaterial).color.set(roleIn(boardRoles, slots[i].role).colour);
+    });
+    badges.forEach((badge, i) => (badge.group.visible = badge.group.visible && i < spots.length));
+    slotGlows.forEach((glow, i) => (glow.visible = glow.visible && i < spots.length));
+  }
+  paintBoard(newRound());
 
   // Staff are small critters in a hat of their role colour, with a name tag
   const cylinderGeometry = new T.CylinderGeometry(1, 1, 1, 24);
@@ -720,11 +790,11 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
 
   // Name tag: name (with a tick once signed on), the days they can work and the shifts they have left
   function tagTexture(person: Staff) {
-    const key = `${person.name}|${person.role}|${person.approved}|${person.days}|${person.off}|${person.worked}/${person.shifts}`;
+    const key = `${person.name}|${roleIn(boardRoles, person.role).colour}|${person.approved}|${person.days}|${person.off}|${person.worked}/${person.shifts}`;
     const cached = tagTextures.get(key);
     if (cached) return cached;
     const texture = paint(280, 132, pen => {
-      pen.fillStyle = roleOf(person.role).colour;
+      pen.fillStyle = roleIn(boardRoles, person.role).colour;
       pen.beginPath();
       pen.roundRect(4, 4, 272, 124, 34);
       pen.fill();
@@ -762,11 +832,12 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
   function crewFor(person: Staff) {
     while (crew.length <= person.id) crew.push(makeCrew());
     const member = crew[person.id];
-    const key = `${person.name}|${person.role}`;
+    const { colour } = roleIn(boardRoles, person.role);
+    const key = `${person.name}|${colour}`;
     if (member.key !== key) {
       member.key = key;
       member.skin.color.setHex(skinTones[(person.name.charCodeAt(0) + person.name.length) % skinTones.length]);
-      member.hat.color.set(roleOf(person.role).colour);
+      member.hat.color.set(colour);
     }
     const map = tagTexture(person);
     if (member.tag.material.map !== map) {
@@ -1035,7 +1106,7 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
   function track(round: Round, now: number) {
     if (round !== tracked) {
       tracked = round;
-      paintBoard(round.week);
+      paintBoard(round);
       seen = round.staff.map(snapshotOf);
       seenBoard = [...round.board];
       crew.forEach(member => (member.root.visible = false));
@@ -1057,7 +1128,8 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
     round.board.forEach((id, slot) => {
       const before = seenBoard[slot];
       if (id === before) return;
-      const spot = slotOf(slot);
+      const spot = spots[slot];
+      if (!spot) return;
       if (id !== undefined) {
         emit(confetti, { x: spot.x, y: spot.y, z: boardZ + .3 }, 26, { colours: confettiColours, speed: 2.4, up: 3.2, gravity: 7, life: 1.2, size: 1 });
         popup("pin", spot.x, spot.y + .9, boardZ + .5, .9);
@@ -1197,7 +1269,7 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
       if (person) {
         if (badge.person !== person.id) {
           badge.person = person.id;
-          badge.surface.map = badgeTexture(person);
+          badge.surface.map = badgeTexture(person, badge.compact);
           badge.surface.needsUpdate = true;
         }
         badge.falling = -10;

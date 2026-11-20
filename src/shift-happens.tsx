@@ -1,9 +1,9 @@
 import { useEffect, useEffectEvent, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent } from "react";
 import { createOfficeWorld } from "./office-world";
 import {
-  beginRound, dayRange, days, filledShifts, interact, neededShifts, newRound, nextAction, roleOf, roster, sampleTeam,
-  settings, shifts, stepRound, stopStamp, walk,
-  type Role, type Round, type Team,
+  beginRound, dayRange, days, filledShifts, interact, neededShifts, newRound, nextAction, roleIn, roster, sampleTeam,
+  settings, stepRound, stopStamp, templates, walk,
+  type Round, type Team,
 } from "./round";
 import { copyTeam, loadTeam, saveTeam, TeamSetup } from "./team-setup";
 import PhoneController from "./phone-controller";
@@ -17,28 +17,41 @@ const keyboards = [
 ];
 const swapKey = "KeyQ";
 const gameKeys = [...keyboards.flatMap(({ up, left, down, right, use }) => [up, left, down, right, use]), swapKey];
-const critterNames = ["duck", "bunny"];
+const critters = [{ name: "duck", emoji: "🐥" }, { name: "bunny", emoji: "🐰" }];
 const stickReach = 46;
 
+const tips = [
+  "Staff wear caps in their role colour. Match the cap to the shift on the board.",
+  "Name tags show the days someone can work and the shifts they have left.",
+  "Sign someone on once at the desk. After that they go straight to the counter.",
+  "A sick call empties that person’s whole day. Refill it fast.",
+  "Playing alone? Press Q to swap between the duck and the bunny.",
+  "Roster my team works for cafés, clinics, salons or anything with shifts.",
+  "Scan the QR code and your phones become the controllers.",
+];
+
 function clock(seconds: number) {
-  const whole = Math.ceil(seconds);
+  const whole = Math.max(0, Math.ceil(seconds));
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
 
 function snapshot(round: Round) {
   return {
     phase: round.phase,
-    time: settings.duration - round.elapsed,
+    time: round.duration - round.elapsed,
+    duration: round.duration,
     filled: filledShifts(round),
     needed: neededShifts(round),
-    week: round.week,
+    roles: round.roles,
+    shiftNames: round.shiftNames,
+    slots: round.slots,
     custom: round.custom,
-    slots: roster(round).map(person => person?.name ?? ""),
+    names: roster(round).map(person => person?.name ?? ""),
     news: round.news.until > round.elapsed ? round.news.text : "",
     players: round.players.map((player, i) => ({
       carrying: player.carrying ? player.carrying.name : "",
       works: player.carrying ? dayRange(player.carrying.days.map((on, day) => on && !player.carrying!.off[day])) : "",
-      colour: player.carrying ? roleOf(player.carrying.role).colour : "",
+      colour: player.carrying ? roleIn(round.roles, player.carrying.role).colour : "",
       approved: player.carrying?.approved ?? false,
       stamp: player.stamping ? (player.carrying?.stamp ?? 0) / settings.stampTime : 0,
       stamping: player.stamping,
@@ -46,36 +59,64 @@ function snapshot(round: Round) {
     })),
   };
 }
+type View = ReturnType<typeof snapshot>;
 
-function rosterText(slots: string[], week: (Role | null)[]) {
-  const line = (day: number) => [day, day + days.length].filter(slot => week[slot])
-    .map(slot => `${shifts[slot].half} ${roleOf(week[slot]!).label}: ${slots[slot] || "open"}`).join(" · ") || "closed";
+/** Places on one shift, with who fills them. */
+const placesOn = (view: Pick<View, "slots" | "names">, shift: number) =>
+  view.slots.map((slot, i) => ({ slot, name: view.names[i] })).filter(({ slot }) => slot.shift === shift);
+
+function rosterText(view: View) {
+  const line = (day: number) => [day, day + 7].map(shift => {
+    const places = placesOn(view, shift);
+    if (!places.length) return "";
+    const people = places.map(({ slot, name }) => `${name || "open"} (${roleIn(view.roles, slot.role).label})`).join(", ");
+    return `${view.shiftNames[shift < 7 ? 0 : 1]}: ${people}`;
+  }).filter(Boolean).join(" · ") || "closed";
   return ["Shift Happens! roster", ...days.map((day, i) => `${day}  ${line(i)}`)].join("\n");
 }
 
-function RosterTable({ slots, week }: { slots: string[]; week: (Role | null)[] }) {
+function RosterTable({ view }: { view: View }) {
   return (
-    <table className="shifts-roster">
-      <thead><tr><th scope="col"><span className="sr-only">Shift</span></th>{days.map(day => <th key={day} scope="col">{day}</th>)}</tr></thead>
-      <tbody>
-        {(["AM", "PM"] as const).map((half, row) => (
-          <tr key={half}>
-            <th scope="row">{half}</th>
-            {days.map((day, i) => {
-              const slot = i + row * days.length;
-              const role = week[slot];
-              if (!role) return <td key={day} data-closed="true" title="Not needed">–</td>;
-              const { colour, label } = roleOf(role);
-              return (
-                <td key={day} data-open={!slots[slot]} style={{ "--role": colour } as CSSProperties} title={label}>
-                  {slots[slot] || "—"}
-                </td>
-              );
-            })}
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div className="roster-scroll">
+      <table className="roster">
+        <thead><tr><th scope="col"><span className="sr-only">Shift</span></th>{days.map(day => <th key={day} scope="col">{day}</th>)}</tr></thead>
+        <tbody>
+          {view.shiftNames.map((name, half) => (
+            <tr key={half}>
+              <th scope="row">{name}</th>
+              {days.map((day, d) => {
+                const places = placesOn(view, d + half * 7);
+                if (!places.length) return <td key={day} data-closed="true" title="Closed">–</td>;
+                return (
+                  <td key={day}>
+                    {places.map(({ slot, name: person }, i) => {
+                      const { colour, label } = roleIn(view.roles, slot.role);
+                      return (
+                        <span key={i} className="roster-chip" data-open={!person} style={{ "--role": colour } as CSSProperties}
+                          title={label}>{person || label}</span>
+                      );
+                    })}
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** One glossy menu button with an icon, a title and a line underneath. */
+function BigButton({ icon, title, note, tone, onClick, disabled }: {
+  icon: string; title: string; note: string; tone: "primary" | "roster"; onClick: () => void; disabled?: boolean;
+}) {
+  return (
+    <button type="button" className={`big big-${tone}`} onClick={onClick} disabled={disabled}>
+      <span className="big-icon" aria-hidden="true">{icon}</span>
+      <span className="big-text"><b>{title}</b><small>{note}</small></span>
+      <span className="big-go" aria-hidden="true">›</span>
+    </button>
   );
 }
 
@@ -120,6 +161,8 @@ function Game() {
   const [copied, setCopied] = useState(false);
   const [team, setTeam] = useState<Team>(() => copyTeam(sampleTeam));
   const [setup, setSetup] = useState(false);
+  const [help, setHelp] = useState(false);
+  const [tip, setTip] = useState(0);
   const lastMode = useRef<"quick" | "real">("quick");
   // Phones as controllers: seat 0 is the duck, seat 1 the bunny
   const [phones, setPhones] = useState<Phones | null>(null);
@@ -127,9 +170,17 @@ function Game() {
   const seats = useRef<(string | null)[]>([null, null]);
   const remote = useRef([{ x: 0, y: 0, act: false }, { x: 0, y: 0, act: false }]);
 
-  function copyRoster(slots: string[], week: (Role | null)[]) {
-    navigator.clipboard?.writeText(rosterText(slots, week)).then(() => setCopied(true), () => setCopied(false));
+  function copyRoster() {
+    navigator.clipboard?.writeText(rosterText(view)).then(() => setCopied(true), () => setCopied(false));
   }
+
+  // A new tip along the bottom every few seconds while the menu is up
+  const menuUp = view.phase === "ready" && !setup;
+  useEffect(() => {
+    if (!menuUp) return;
+    const timer = window.setInterval(() => setTip(current => (current + 1) % tips.length), 6000);
+    return () => window.clearInterval(timer);
+  }, [menuUp]);
 
   function changeTeam(next: Team) {
     setTeam(next);
@@ -230,7 +281,7 @@ function Game() {
     };
   }, [roomCode, roomLocal]);
 
-  function usePhones() {
+  function startPhones() {
     sound.current?.unlock();
     setPhones({ code: makeRoomCode(), local: wantsLocalLink(), seats: [null, null], failed: false });
   }
@@ -332,21 +383,28 @@ function Game() {
       round.current.players.forEach(stopStamp);
     }
 
-    frame = requestAnimationFrame(now => {
-      try {
-        world = createOfficeWorld(viewport, effects);
-      } catch {
-        setGraphics("failed");
-        return;
-      }
-      setGraphics("ready");
-      loop(now);
+    // Draw the office once the rounded font is in, so its signs and name tags use it (or after a second regardless)
+    let cancelled = false;
+    const fontReady = Promise.race([document.fonts.load('700 32px "Fredoka Variable"'), new Promise(done => setTimeout(done, 1000))]);
+    fontReady.catch(() => {}).then(() => {
+      if (cancelled) return;
+      frame = requestAnimationFrame(now => {
+        try {
+          world = createOfficeWorld(viewport, effects);
+        } catch {
+          setGraphics("failed");
+          return;
+        }
+        setGraphics("ready");
+        loop(now);
+      });
     });
     window.addEventListener("keydown", keydown);
     window.addEventListener("keyup", keyup);
     window.addEventListener("blur", clearKeys);
     document.addEventListener("visibilitychange", clearKeys);
     return () => {
+      cancelled = true;
       cancelAnimationFrame(frame);
       window.removeEventListener("keydown", keydown);
       window.removeEventListener("keyup", keyup);
@@ -367,7 +425,12 @@ function Game() {
     setLead(0);
     setCopied(false);
     const state = mode === "real"
-      ? newRound({ ...team, people: team.people.filter(person => person.name.trim()).map(person => ({ ...person, name: person.name.trim() })) }, true)
+      ? newRound({
+        ...team,
+        roles: team.roles.map((role, i) => ({ ...role, label: role.label.trim() || `Role ${i + 1}` })),
+        shiftNames: [team.shiftNames[0].trim() || "AM", team.shiftNames[1].trim() || "PM"],
+        people: team.people.filter(person => person.name.trim()).map(person => ({ ...person, name: person.name.trim() })),
+      }, true)
       : newRound();
     beginRound(state);
     round.current = state;
@@ -423,151 +486,210 @@ function Game() {
 
   const urgent = view.time <= 20 && view.phase === "playing";
   const solo = view.players[lead];
+  const playing = view.phase === "playing";
+  const savedKind = templates.find(template => template.id === team.kind);
+  const custom = team.kind !== "cafe" || team.people.length !== sampleTeam.people.length;
+  const progress = view.needed ? view.filled / view.needed : 0;
+  const dayCounts = days.map((_, d) => {
+    const places = [d, d + 7].flatMap(shift => placesOn(view, shift));
+    return { need: places.length, have: places.filter(place => place.name).length };
+  });
+
+  const phonePanel = phones && (
+    <div className="phones">
+      <QrCode text={joinUrl(phones.code, phones.local)} label={`QR code to join room ${phones.code} with a phone`} />
+      <div>
+        <strong>Scan to use your phone as a controller</strong>
+        <p>Room <b className="phones-code">{phones.code}</b>{phones.local ? " · same-browser test" : ""}</p>
+        <ul>
+          {critters.map(({ name, emoji }, i) => (
+            <li key={name} data-on={Boolean(phones.seats[i])}>{emoji} {name[0].toUpperCase() + name.slice(1)}: {phones.seats[i] ? "phone connected" : "waiting…"}</li>
+          ))}
+        </ul>
+        {phones.failed && <p className="phones-error">Couldn’t open the room. Check the internet connection.</p>}
+        <button type="button" className="link" onClick={() => setPhones(null)}>Stop using phones</button>
+      </div>
+    </div>
+  );
 
   return (
-    <main className="shifts">
-      <header className="shifts-head">
-        <h1>Shift Happens<span>!</span></h1>
-        <div className="shifts-score" aria-label="Round score">
-          <span><small>Covered</small><strong>{view.filled}<i> / {view.needed}</i></strong></span>
-          <span className={urgent ? "shifts-urgent" : undefined}>
-            <small>Time left</small><strong>{clock(view.time)}</strong>
-          </span>
-          {phones && <span className="shifts-phone-chip" title={`Room ${phones.code}`}><small>Phones</small><strong>📱 {phones.seats.filter(Boolean).length}</strong></span>}
-          <button type="button" className="shifts-sound" onClick={toggleSound}
-            aria-pressed={!muted} aria-label={muted ? "Turn sound on" : "Turn sound off"}>{muted ? "🔇" : "🔊"}</button>
-        </div>
-      </header>
+    <main className={`sh${urgent ? " sh--urgent" : ""}${playing ? " sh--playing" : ""}`}>
+      <section className="stage" aria-label="Office">
+        <div className="stage-canvas" ref={host} tabIndex={0} />
 
-      <section className="shifts-board" aria-label="Weekly roster">
-        {days.map((day, i) => (
-          <div className="shifts-day" key={day}>
-            <b>{day}</b>
-            {([i, i + days.length]).map(index => {
-              const role = view.week[index];
-              if (!role) return <span key={index} data-closed="true" aria-label={`${shifts[index].label}: closed`}><span>{shifts[index].half}</span><em>–</em></span>;
-              const { colour, label } = roleOf(role);
-              const name = view.slots[index];
+        <header className="hud">
+          <div className="brand" aria-label="Shift Happens!"><span className="brand-tag">Shift</span><span className="brand-word">Happens!</span></div>
+          <div className="hud-stats" aria-label="Round score">
+            <div className="stat stat-covered">
+              <small>Covered</small>
+              <strong>{view.filled}<i>/{view.needed}</i></strong>
+              <span className="stat-bar" aria-hidden="true"><span style={{ width: `${progress * 100}%` }} /></span>
+            </div>
+            <div className={`stat stat-time${urgent ? " is-urgent" : ""}`} style={{ "--left": view.time / view.duration } as CSSProperties}>
+              <span className="stat-ring" aria-hidden="true" />
+              <small>Time</small>
+              <strong>{clock(view.time)}</strong>
+            </div>
+            {phones && <div className="stat stat-chip" title={`Room ${phones.code}`}><small>Phones</small><strong>📱{phones.seats.filter(Boolean).length}</strong></div>}
+            <button type="button" className="icon-btn" onClick={toggleSound}
+              aria-pressed={!muted} aria-label={muted ? "Turn sound on" : "Turn sound off"}>{muted ? "🔇" : "🔊"}</button>
+          </div>
+        </header>
+
+        {playing && (
+          <ol className="week-strip" aria-label="Shifts covered each day">
+            {days.map((day, d) => {
+              const { need, have } = dayCounts[d];
               return (
-                <span key={index} data-filled={Boolean(name)} style={{ "--role": colour } as CSSProperties}
-                  aria-label={`${shifts[index].label}, ${label}: ${name || "open"}`}>
-                  <span>{shifts[index].half}</span><em>{name || label}</em>
-                </span>
+                <li key={day} data-state={!need ? "closed" : have === need ? "done" : "open"}>
+                  <b>{day}</b>
+                  <span>{need ? `${have}/${need}` : "–"}</span>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+
+        {playing && view.news && <p className="toast" role="status" key={view.news}><span aria-hidden="true">📞</span> {view.news}</p>}
+
+        {playing && (
+          <div className="pads" aria-label="Player controls">
+            {keyboards.map(({ guide, action }, i) => {
+              // Player 1's keys follow whichever critter they have swapped to.
+              const critter = i === 0 ? lead : 1;
+              const player = view.players[critter];
+              return (
+                <section className="pad-card" data-critter={critter} key={action} aria-label={`Player ${i + 1}, controlling the ${critters[critter].name}`}>
+                  <span className="pad-avatar" aria-hidden="true">{critters[critter].emoji}
+                    {player.stamping && <svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="16" pathLength="1" style={{ strokeDashoffset: 1 - player.stamp }} /></svg>}
+                  </span>
+                  <div>
+                    <div className="pad-keys"><kbd>{guide}</kbd> <kbd>{action}</kbd>{i === 0 && <> <kbd>Q</kbd> swap</>}</div>
+                    <p className="pad-prompt">
+                      {player.carrying && <span className="person-chip" style={{ "--role": player.colour } as CSSProperties}>{player.carrying}{player.approved ? " ✓" : ""}</span>}
+                      <span>{player.stamping ? "Stamping…" : player.prompt}</span>
+                    </p>
+                  </div>
+                </section>
               );
             })}
           </div>
-        ))}
-      </section>
+        )}
 
-      <section className={urgent ? "shifts-game shifts-game--urgent" : "shifts-game"} aria-label="Office">
-        <div className="shifts-floor" ref={host} tabIndex={0} />
-        {view.phase === "playing" && view.news && <p className="shifts-news" role="status">📞 {view.news}</p>}
-        {view.phase === "playing" && (
-          <div className="shifts-touch" aria-label="Player 1 touch controls">
-            <div className="shifts-stick" onPointerDown={stickDown} onPointerMove={stickMove}
+        {playing && (
+          <div className="touch" aria-label="Player 1 touch controls">
+            <div className="touch-stick" onPointerDown={stickDown} onPointerMove={stickMove}
               onPointerUp={stickUp} onPointerCancel={stickUp} onLostPointerCapture={stickUp}
               role="presentation">
               <span ref={knob} />
             </div>
-            <div className="shifts-action">
-              <button type="button" className="shifts-swap" onPointerDown={event => { event.preventDefault(); swap(); }}
-                aria-label={`Switch to the ${critterNames[1 - lead]}`}>
-                <span aria-hidden="true">{lead === 0 ? "🐰" : "🐥"}</span>
+            <div className="touch-right">
+              <button type="button" className="touch-swap" onPointerDown={event => { event.preventDefault(); swap(); }}
+                aria-label={`Switch to the ${critters[1 - lead].name}`}>
+                <span aria-hidden="true">{critters[1 - lead].emoji}</span>
                 <small>Swap</small>
               </button>
               {solo.carrying && (
-                <b className="shifts-person" style={{ "--role": solo.colour } as CSSProperties}>{solo.carrying}{solo.approved ? " ✓" : ""} · {solo.works}</b>
+                <b className="person-chip" style={{ "--role": solo.colour } as CSSProperties}>{solo.carrying}{solo.approved ? " ✓" : ""} · {solo.works}</b>
               )}
-              <button type="button" onPointerDown={actionDown} onLostPointerCapture={() => release("Space")}
+              <button type="button" className="touch-action" onPointerDown={actionDown} onLostPointerCapture={() => release("Space")}
                 onPointerUp={() => release("Space")}>
                 {solo.stamping ? "Stamping…" : solo.prompt}
               </button>
             </div>
           </div>
         )}
-        {(view.phase !== "playing" || graphics === "failed") && (
-          <div className={setup ? "shifts-overlay shifts-overlay--setup" : "shifts-overlay"}>
-            <div>
-              {graphics === "failed" ? (
-                <><h2>Office couldn’t load</h2><p>Open this game in a browser with WebGL 2 enabled.</p></>
-              ) : setup ? (
-                <TeamSetup team={team} onChange={changeTeam} onPlay={() => start("real")} onBack={() => setSetup(false)} />
-              ) : view.phase === "ready" ? (
-                <>
-                  <h2>Cover the week</h2>
-                  <p>Staff are waiting. Sign them on at the manager’s desk, pass them over the counter and roster each one onto a shift that matches their role, on a day they can work. Watch out for sick calls.</p>
-                  <p className="shifts-tip">Playing alone? Swap between the duck and the bunny with <kbd>Q</kbd> or the swap button.</p>
-                  <div className="shifts-end-actions">
-                    <button disabled={graphics !== "ready"} onClick={() => start("quick")}>Quick play</button>
-                    <button type="button" className="shifts-copy" disabled={graphics !== "ready"} onClick={() => setSetup(true)}>Run it for real</button>
-                  </div>
-                  {phones ? (
-                    <div className="shifts-qr shifts-phones">
-                      <QrCode text={joinUrl(phones.code, phones.local)} label={`QR code to join room ${phones.code} with a phone`} />
-                      <div>
-                        <strong>Scan to use your phone as a controller</strong>
-                        <p>Room <b>{phones.code}</b>{phones.local ? " · same-browser test" : ""}</p>
-                        <ul>
-                          {["🐥 Duck", "🐰 Bunny"].map((name, i) => (
-                            <li key={name} data-on={Boolean(phones.seats[i])}>{name}: {phones.seats[i] ? "phone connected" : "waiting…"}</li>
-                          ))}
-                        </ul>
-                        {phones.failed && <p className="shifts-phone-error">Couldn’t open the room. Check the internet connection.</p>}
-                        <button type="button" className="shifts-link" onClick={() => setPhones(null)}>Stop using phones</button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="shifts-qr">
-                      <PlayQr />
-                      <div>
-                        <p><strong>Play on your phone</strong>Scan to open {playUrl.replace("https://", "")}</p>
-                        <button type="button" className="shifts-link" onClick={usePhones}>Or use phones as controllers</button>
-                      </div>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <>
-                  <h2>{view.phase === "won" ? "Week covered!" : "Understaffed"}</h2>
-                  <p>{view.phase === "won" ? `Rostered with ${clock(view.time)} to spare.` : `${view.filled} of ${view.needed} shifts covered.`}</p>
-                  <RosterTable slots={view.slots} week={view.week} />
-                  <div className="shifts-end-actions">
-                    <button type="button" className="shifts-copy" onClick={() => copyRoster(view.slots, view.week)}>{copied ? "Copied" : "Copy roster"}</button>
-                    {view.custom && <button type="button" className="shifts-copy" onClick={() => setSetup(true)}>Edit team</button>}
-                    <button onClick={() => start()}>Play again</button>
-                  </div>
-                </>
-              )}
-            </div>
+
+        {graphics !== "ready" && (
+          <div className="splash" data-state={graphics}>
+            <div className="splash-logo"><span className="brand-tag">Shift</span><span className="brand-word">Happens!</span></div>
+            {graphics === "failed" ? (
+              <p>The office couldn’t load. Open this game in a browser with WebGL 2 turned on.</p>
+            ) : (
+              <><p>Overcooked, but for rostering</p><span className="splash-bar" aria-label="Loading"><span /></span></>
+            )}
           </div>
         )}
-      </section>
 
-      <div className="shifts-controls" aria-label="Player controls">
-        {keyboards.map(({ guide, action }, i) => {
-          // Player 1's keys follow whichever critter they have swapped to.
-          const critter = i === 0 ? lead : 1;
-          const player = view.players[critter];
-          return (
-            <section className="shifts-player" key={action} aria-label={`Player ${i + 1}, controlling the ${critterNames[critter]}`}>
-              <strong className="shifts-player-tag" data-critter={critter}>P{critter + 1}</strong>
-              <div>
-                <div className="shifts-keys">
-                  <kbd>{guide}</kbd> <kbd>{action}</kbd>
-                  {i === 0 && <> · <kbd>Q</kbd> swap</>}
+        {graphics === "ready" && !playing && (
+          <div className={`screen${setup ? " screen--setup" : help ? " screen--help" : view.phase === "ready" ? " screen--menu" : " screen--end"}`}>
+            {setup ? (
+              <div className="panel panel-wide">
+                <TeamSetup team={team} onChange={changeTeam} onPlay={() => start("real")} onBack={() => setSetup(false)} />
+              </div>
+            ) : help ? (
+              <div className="panel panel-help">
+                <p className="kicker">How to play</p>
+                <h2>Cover every shift before the clock runs out</h2>
+                <ol className="how">
+                  <li><span aria-hidden="true">🙋</span><b>Grab</b><small>Pick up someone waiting at the table.</small></li>
+                  <li><span aria-hidden="true">✍️</span><b>Sign on</b><small>Hold the action key at the desk. Once per person.</small></li>
+                  <li><span aria-hidden="true">🤝</span><b>Pass</b><small>Put them on the counter for the other critter.</small></li>
+                  <li><span aria-hidden="true">📌</span><b>Roster</b><small>At the board, pin them on a day they work, in a shift for their role.</small></li>
+                </ol>
+                <div className="how-keys">
+                  <span>🐥 <kbd>WASD</kbd> + <kbd>Space</kbd></span>
+                  <span>🐰 <kbd>↑ ← ↓ →</kbd> + <kbd>Enter</kbd></span>
+                  <span>Solo? <kbd>Q</kbd> swaps critters</span>
                 </div>
-                {view.phase === "playing" && (
-                  <div className="shifts-prompt">
-                    {player.carrying && <span className="shifts-person" style={{ "--role": player.colour } as CSSProperties}>{player.carrying}{player.approved ? " ✓" : ""} · {player.works}</span>}
-                    <span>{player.stamping ? "Stamping…" : player.prompt}</span>
+                <p className="how-note">Caps show each person’s role. Name tags show their days and shifts left. Sick calls knock people off the board, so watch the phone.</p>
+                <div className="actions">
+                  <button type="button" className="btn btn-primary" onClick={() => { setHelp(false); start("quick"); }}>Got it, let’s play</button>
+                  <button type="button" className="btn btn-ghost" onClick={() => setHelp(false)}>Back</button>
+                </div>
+              </div>
+            ) : view.phase === "ready" ? (
+              <div className="panel panel-menu">
+                <div className="logo"><span className="brand-tag">Shift</span><span className="brand-word">Happens!</span></div>
+                <p className="tagline">Overcooked, but for rostering. Play the chaos, get a real roster.</p>
+                <BigButton tone="primary" icon="▶" title="Quick play" note="Sample café · 3 minutes · 1–2 players" onClick={() => start("quick")} />
+                <BigButton tone="roster" icon="📋" title="Roster my team"
+                  note={custom && savedKind ? `Continue your ${savedKind.label.toLowerCase()} week · ${team.people.length} people` : "Your staff and shifts in, a real roster out"}
+                  onClick={() => setSetup(true)} />
+                <div className="tiles">
+                  <button type="button" className="tile" data-on={Boolean(phones)} onClick={() => (phones ? setPhones(null) : startPhones())}>
+                    <span className="tile-icon tile-icon--phones" aria-hidden="true">📱</span><b>Phones</b><small>{phones ? "Turn off" : "as controllers"}</small>
+                  </button>
+                  <button type="button" className="tile" onClick={() => setHelp(true)}>
+                    <span className="tile-icon tile-icon--help" aria-hidden="true">💡</span><b>How to play</b><small>30-second guide</small>
+                  </button>
+                  <button type="button" className="tile" onClick={toggleSound}>
+                    <span className="tile-icon tile-icon--sound" aria-hidden="true">{muted ? "🔇" : "🔊"}</span><b>Sound</b><small>{muted ? "Off" : "On"}</small>
+                  </button>
+                </div>
+                {phonePanel ?? (
+                  <div className="share">
+                    <PlayQr />
+                    <p><b>Play on your phone</b>Scan to open {playUrl.replace("https://", "")}</p>
                   </div>
                 )}
               </div>
-              {player.stamping && <progress aria-label={`The ${critterNames[critter]}’s approval progress`} value={player.stamp} max={1} />}
-            </section>
-          );
-        })}
-      </div>
+            ) : (
+              <div className="panel panel-end">
+                <p className="kicker">{view.custom ? "Your week" : "Sample café"}</p>
+                <h2 className={view.phase === "won" ? "end-won" : "end-lost"}>{view.phase === "won" ? "Week covered!" : "Understaffed"}</h2>
+                <div className="end-stats">
+                  <span><b>{view.filled}/{view.needed}</b><small>places filled</small></span>
+                  <span><b>{view.phase === "won" ? clock(view.time) : "0:00"}</b><small>time to spare</small></span>
+                  <span><b>{Math.round(progress * 100)}%</b><small>covered</small></span>
+                </div>
+                <RosterTable view={view} />
+                <div className="actions">
+                  <button type="button" className="btn btn-soft" onClick={copyRoster}>{copied ? "Copied ✓" : "Copy roster"}</button>
+                  {view.custom && <button type="button" className="btn btn-soft" onClick={() => setSetup(true)}>Edit team</button>}
+                  <button type="button" className="btn btn-ghost" onClick={() => { round.current = newRound(); setView(snapshot(round.current)); }}>Menu</button>
+                  <button type="button" className="btn btn-primary" onClick={() => start()}>Play again</button>
+                </div>
+                {phonePanel}
+              </div>
+            )}
+          </div>
+        )}
+
+        {graphics === "ready" && view.phase === "ready" && !setup && !help && (
+          <p className="ticker" key={tip}><b>Tip</b><span>{tips[tip]}</span></p>
+        )}
+      </section>
     </main>
   );
 }
