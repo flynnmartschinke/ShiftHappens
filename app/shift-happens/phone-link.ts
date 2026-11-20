@@ -1,0 +1,127 @@
+/**
+ * Phones as controllers: the laptop running the game "hosts" a room, and phones join it as gamepads.
+ *
+ * Phones and the laptop talk directly over WebRTC. Trystero only uses public relays to introduce them, so this works
+ * from a static site such as GitHub Pages with no game server. Add `?link=local` to the host's address to swap in a
+ * stand-in that only connects tabs in the same browser, for testing without a network.
+ */
+
+/** What a phone sends: where its stick points, whether the action button is held, and requests to start a round. */
+export type PhoneMessage =
+  | { t: "input"; x: number; y: number; act: boolean }
+  | { t: "start" };
+
+/** What the laptop sends back: which critter the phone controls, and what that critter is doing. */
+export type HostMessage =
+  | { t: "seat"; player: number }
+  | {
+    t: "status";
+    phase: "ready" | "playing" | "won" | "lost";
+    prompt: string;
+    carrying: string;
+    colour: string;
+    approved: boolean;
+    stamping: boolean;
+    time: number;
+    filled: number;
+    needed: number;
+    news: string;
+  };
+
+export type Message = PhoneMessage | HostMessage;
+
+export type Link = {
+  send: (message: Message, to?: string) => void;
+  onMessage: (handler: (message: Message, from: string) => void) => void;
+  onJoin: (handler: (peer: string) => void) => void;
+  onLeave: (handler: (peer: string) => void) => void;
+  close: () => void;
+};
+
+const appId = "vetematts.github.io/ShiftHappens";
+// Letters and digits that are hard to misread when typed from a screen
+const codeLetters = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+
+export function makeRoomCode() {
+  return Array.from({ length: 4 }, () => codeLetters[Math.floor(Math.random() * codeLetters.length)]).join("");
+}
+
+/** The address a phone opens to join. A hash survives GitHub Pages and keeps the code out of server logs. */
+export function joinUrl(code: string, local: boolean) {
+  return `${location.origin}${location.pathname}#join-${code}${local ? "-local" : ""}`;
+}
+
+/** Reads a join link from the current address: `#join-ABCD` (or `?join=ABCD`). */
+export function readJoin(): { code: string; local: boolean } | null {
+  const hash = location.hash.match(/^#join-([A-Z0-9]{4})(-local)?$/i);
+  if (hash) return { code: hash[1].toUpperCase(), local: Boolean(hash[2]) };
+  const query = new URLSearchParams(location.search).get("join");
+  if (query && /^[A-Z0-9]{4}$/i.test(query)) return { code: query.toUpperCase(), local: false };
+  return null;
+}
+
+/** Whether the host should use the same-browser stand-in instead of the network. */
+export const wantsLocalLink = () => new URLSearchParams(location.search).get("link") === "local";
+
+export async function openLink(code: string, local: boolean): Promise<Link> {
+  return local ? openLocalLink(code) : openNetworkLink(code);
+}
+
+async function openNetworkLink(code: string): Promise<Link> {
+  // Loaded only when someone uses phones, so the game itself never contacts the relays
+  const { joinRoom } = await import("trystero");
+  const room = joinRoom({ appId, identity: "none" }, `room-${code}`);
+  const channel = room.makeAction<Message>("msg");
+  return {
+    send: (message, to) => void channel.send(message, { target: to ?? null }).catch(() => {}),
+    onMessage: handler => void channel.onMessage((data, context) => handler(data, context.peerId)),
+    onJoin: handler => void room.onPeerJoin(context => handler(context.peerId)),
+    onLeave: handler => void room.onPeerLeave(context => handler(context.peerId)),
+    close: () => void room.leave(),
+  };
+}
+
+type Envelope = { from: string; to?: string; kind: "hello" | "hi" | "bye" | "msg"; data?: Message };
+
+// Same-browser stand-in with the same shape as the network link, built on BroadcastChannel
+function openLocalLink(code: string): Link {
+  const self = Math.random().toString(36).slice(2, 10);
+  const channel = new BroadcastChannel(`shift-happens-${code}`);
+  const peers = new Set<string>();
+  const handlers = { message: [] as ((m: Message, from: string) => void)[], join: [] as ((p: string) => void)[], leave: [] as ((p: string) => void)[] };
+  const post = (envelope: Omit<Envelope, "from">) => channel.postMessage({ ...envelope, from: self });
+  const meet = (peer: string) => {
+    if (peers.has(peer)) return;
+    peers.add(peer);
+    handlers.join.forEach(handler => handler(peer));
+  };
+  channel.onmessage = ({ data }: MessageEvent<Envelope>) => {
+    if (data.from === self || (data.to && data.to !== self)) return;
+    if (data.kind === "hello") {
+      meet(data.from);
+      post({ kind: "hi", to: data.from });
+    } else if (data.kind === "hi") {
+      meet(data.from);
+    } else if (data.kind === "bye") {
+      if (peers.delete(data.from)) handlers.leave.forEach(handler => handler(data.from));
+    } else if (data.data) {
+      meet(data.from);
+      handlers.message.forEach(handler => handler(data.data!, data.from));
+    }
+  };
+  const goodbye = () => post({ kind: "bye" });
+  window.addEventListener("pagehide", goodbye);
+  // Say hello once listeners have had a chance to attach
+  setTimeout(() => post({ kind: "hello" }), 50);
+  return {
+    send: (message, to) => post({ kind: "msg", to, data: message }),
+    onMessage: handler => void handlers.message.push(handler),
+    onJoin: handler => void handlers.join.push(handler),
+    onLeave: handler => void handlers.leave.push(handler),
+    close: () => {
+      goodbye();
+      window.removeEventListener("pagehide", goodbye);
+      channel.close();
+    },
+  };
+}

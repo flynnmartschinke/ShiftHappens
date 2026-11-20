@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useEffectEvent, useRef, useState, type CSSProperties, type PointerEvent } from "react";
+import { useEffect, useEffectEvent, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent } from "react";
 import { createOfficeWorld } from "./office-world";
 import {
   beginRound, dayRange, days, filledShifts, interact, neededShifts, newRound, nextAction, roleOf, roster, sampleTeam,
@@ -8,7 +8,9 @@ import {
   type Role, type Round, type Team,
 } from "./round";
 import { copyTeam, loadTeam, saveTeam, TeamSetup } from "./team-setup";
-import { PlayQr, playUrl } from "./play-qr";
+import PhoneController from "./phone-controller";
+import { joinUrl, makeRoomCode, openLink, readJoin, wantsLocalLink, type Link, type Message } from "./phone-link";
+import { PlayQr, playUrl, QrCode } from "./play-qr";
 import { createSound, type Sound } from "./sound";
 
 const keyboards = [
@@ -79,7 +81,29 @@ function RosterTable({ slots, week }: { slots: string[]; week: (Role | null)[] }
   );
 }
 
+/** Shows the game, or a phone controller when the page was opened from a join link. */
 export default function ShiftHappens() {
+  // The address is only known in the browser, so the server renders nothing and the browser decides.
+  const join = useSyncExternalStore(watchAddress, joinKey, () => null);
+  if (join === null) return null;
+  if (!join) return <Game />;
+  const [code, local] = join.split("|");
+  return <PhoneController code={code} local={local === "local"} />;
+}
+
+function watchAddress(changed: () => void) {
+  window.addEventListener("hashchange", changed);
+  return () => window.removeEventListener("hashchange", changed);
+}
+
+function joinKey() {
+  const join = readJoin();
+  return join ? `${join.code}|${join.local ? "local" : "net"}` : "";
+}
+
+type Phones = { code: string; local: boolean; seats: (string | null)[]; failed: boolean };
+
+function Game() {
   const host = useRef<HTMLDivElement>(null);
   const round = useRef(newRound());
   const keys = useRef(new Set<string>());
@@ -99,6 +123,11 @@ export default function ShiftHappens() {
   const [team, setTeam] = useState<Team>(() => copyTeam(sampleTeam));
   const [setup, setSetup] = useState(false);
   const lastMode = useRef<"quick" | "real">("quick");
+  // Phones as controllers: seat 0 is the duck, seat 1 the bunny
+  const [phones, setPhones] = useState<Phones | null>(null);
+  const phoneLink = useRef<Link | null>(null);
+  const seats = useRef<(string | null)[]>([null, null]);
+  const remote = useRef([{ x: 0, y: 0, act: false }, { x: 0, y: 0, act: false }]);
 
   function copyRoster(slots: string[], week: (Role | null)[]) {
     navigator.clipboard?.writeText(rosterText(slots, week)).then(() => setCopied(true), () => setCopied(false));
@@ -115,6 +144,12 @@ export default function ShiftHappens() {
     keys.current.add(code);
     if (code === swapKey) {
       swap();
+      return;
+    }
+    if (code.startsWith("Phone")) {
+      const critter = Number(code.slice(5));
+      holding.current.set(code, critter);
+      interact(round.current, critter);
       return;
     }
     const control = keyboards.findIndex(entry => entry.use === code);
@@ -134,6 +169,73 @@ export default function ShiftHappens() {
   // Keyboard listeners live in an effect, so they reach the latest press and release through effect events.
   const onKeyDown = useEffectEvent((code: string) => press(code));
   const onKeyUp = useEffectEvent((code: string) => release(code));
+
+  function seatPhone(peer: string) {
+    let seat = seats.current.indexOf(peer);
+    if (seat === -1) {
+      seat = seats.current.indexOf(null);
+      if (seat !== -1) seats.current[seat] = peer;
+      setPhones(current => current && { ...current, seats: [...seats.current] });
+    }
+    phoneLink.current?.send({ t: "seat", player: seat }, peer);
+    return seat;
+  }
+
+  // Phone events arrive from the link, which is opened in an effect below.
+  const onPhoneJoin = useEffectEvent((peer: string) => seatPhone(peer));
+  const onPhoneLeave = useEffectEvent((peer: string) => {
+    const seat = seats.current.indexOf(peer);
+    if (seat === -1) return;
+    seats.current[seat] = null;
+    remote.current[seat] = { x: 0, y: 0, act: false };
+    release(`Phone${seat}`);
+    setPhones(current => current && { ...current, seats: [...seats.current] });
+  });
+  const onPhoneMessage = useEffectEvent((message: Message, peer: string) => {
+    if (message.t === "start") {
+      if (round.current.phase !== "playing" && !setup) start();
+      return;
+    }
+    if (message.t !== "input") return;
+    const seat = seats.current.includes(peer) ? seats.current.indexOf(peer) : seatPhone(peer);
+    if (seat < 0) return;
+    const input = remote.current[seat];
+    const clamp = (value: number) => Math.max(-1, Math.min(1, Number(value) || 0));
+    input.x = clamp(message.x);
+    input.y = clamp(message.y);
+    if (message.act && !input.act) press(`Phone${seat}`);
+    if (!message.act && input.act) release(`Phone${seat}`);
+    input.act = Boolean(message.act);
+  });
+
+  const roomCode = phones?.code;
+  const roomLocal = phones?.local ?? false;
+  useEffect(() => {
+    if (!roomCode) return;
+    let closed = false;
+    openLink(roomCode, roomLocal).then(link => {
+      if (closed) {
+        link.close();
+        return;
+      }
+      phoneLink.current = link;
+      link.onJoin(peer => onPhoneJoin(peer));
+      link.onLeave(peer => onPhoneLeave(peer));
+      link.onMessage((message, peer) => onPhoneMessage(message, peer));
+    }).catch(() => setPhones(current => current && { ...current, failed: true }));
+    return () => {
+      closed = true;
+      phoneLink.current?.close();
+      phoneLink.current = null;
+      seats.current = [null, null];
+      remote.current = [{ x: 0, y: 0, act: false }, { x: 0, y: 0, act: false }];
+    };
+  }, [roomCode, roomLocal]);
+
+  function usePhones() {
+    sound.current?.unlock();
+    setPhones({ code: makeRoomCode(), local: wantsLocalLink(), seats: [null, null], failed: false });
+  }
 
   function swap() {
     if (round.current.phase !== "playing") return;
@@ -163,6 +265,7 @@ export default function ShiftHappens() {
     let frame: number;
     let previous = performance.now();
     let lastUi = 0;
+    let lastBroadcast = 0;
     let displayedPhase: Round["phase"] | undefined;
     let displayedRound: Round | undefined;
 
@@ -180,6 +283,10 @@ export default function ShiftHappens() {
         });
         moves[active.current].across += stick.current.x;
         moves[active.current].downward += stick.current.y;
+        remote.current.forEach((input, i) => {
+          moves[i].across += input.x;
+          moves[i].downward += input.y;
+        });
         moves.forEach(({ across, downward }, i) => {
           const [dx, dz] = world!.toWorld(across, downward);
           walk(state, i, Math.abs(dx) < 1e-6 ? 0 : dx, Math.abs(dz) < 1e-6 ? 0 : dz, Math.min(.05, seconds));
@@ -187,6 +294,20 @@ export default function ShiftHappens() {
         stepRound(state, seconds);
       }
       world?.draw(state, focus.current);
+      // Tell each phone what its critter is doing, about five times a second
+      if (phoneLink.current && now - lastBroadcast >= 200) {
+        lastBroadcast = now;
+        const latest = snapshot(state);
+        seats.current.forEach((peer, i) => {
+          if (!peer) return;
+          const player = latest.players[i];
+          phoneLink.current!.send({
+            t: "status", phase: state.phase, prompt: player.prompt, carrying: player.carrying, colour: player.colour,
+            approved: player.approved, stamping: player.stamping, time: latest.time, filled: latest.filled,
+            needed: latest.needed, news: latest.news,
+          }, peer);
+        });
+      }
       const changed = displayedRound !== state || displayedPhase !== state.phase;
       if (changed || (state.phase === "playing" && now - lastUi >= 80)) {
         setView(snapshot(state));
@@ -314,6 +435,7 @@ export default function ShiftHappens() {
           <span className={urgent ? "shifts-urgent" : undefined}>
             <small>Time left</small><strong>{clock(view.time)}</strong>
           </span>
+          {phones && <span className="shifts-phone-chip" title={`Room ${phones.code}`}><small>Phones</small><strong>📱 {phones.seats.filter(Boolean).length}</strong></span>}
           <button type="button" className="shifts-sound" onClick={toggleSound}
             aria-pressed={!muted} aria-label={muted ? "Turn sound on" : "Turn sound off"}>{muted ? "🔇" : "🔊"}</button>
         </div>
@@ -381,10 +503,30 @@ export default function ShiftHappens() {
                     <button disabled={graphics !== "ready"} onClick={() => start("quick")}>Quick play</button>
                     <button type="button" className="shifts-copy" disabled={graphics !== "ready"} onClick={() => setSetup(true)}>Run it for real</button>
                   </div>
-                  <div className="shifts-qr">
-                    <PlayQr />
-                    <p><strong>Play on your phone</strong>Scan to open {playUrl.replace("https://", "")}</p>
-                  </div>
+                  {phones ? (
+                    <div className="shifts-qr shifts-phones">
+                      <QrCode text={joinUrl(phones.code, phones.local)} label={`QR code to join room ${phones.code} with a phone`} />
+                      <div>
+                        <strong>Scan to use your phone as a controller</strong>
+                        <p>Room <b>{phones.code}</b>{phones.local ? " · same-browser test" : ""}</p>
+                        <ul>
+                          {["🐥 Duck", "🐰 Bunny"].map((name, i) => (
+                            <li key={name} data-on={Boolean(phones.seats[i])}>{name}: {phones.seats[i] ? "phone connected" : "waiting…"}</li>
+                          ))}
+                        </ul>
+                        {phones.failed && <p className="shifts-phone-error">Couldn’t open the room. Check the internet connection.</p>}
+                        <button type="button" className="shifts-link" onClick={() => setPhones(null)}>Stop using phones</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="shifts-qr">
+                      <PlayQr />
+                      <div>
+                        <p><strong>Play on your phone</strong>Scan to open {playUrl.replace("https://", "")}</p>
+                        <button type="button" className="shifts-link" onClick={usePhones}>Or use phones as controllers</button>
+                      </div>
+                    </div>
+                  )}
                 </>
               ) : (
                 <>
