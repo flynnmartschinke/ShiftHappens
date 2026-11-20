@@ -577,7 +577,7 @@ function Game() {
         )}
 
         {playing && (
-          <div className="touch" aria-label="Player 1 touch controls">
+          <div className="touch" aria-label="Player 1 touch controls" onContextMenu={event => event.preventDefault()}>
             <div className="touch-stick" onPointerDown={stickDown} onPointerMove={stickMove}
               onPointerUp={stickUp} onPointerCancel={stickUp} onLostPointerCapture={stickUp}
               role="presentation">

@@ -18,6 +18,9 @@
 
 body:has(.sh), body:has(.gp) { margin: 0; overflow: hidden; background: #1d1638; overscroll-behavior: none; }
 .sh, .gp { font-family: var(--font); }
+/* Holding a button on a phone shouldn't select text or open the long-press menu */
+.sh, .gp { -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+.sh input, .sh select { -webkit-user-select: text; user-select: text; }
 .sh button, .gp button, .sh input, .sh select { font-family: inherit; }
 .sh kbd { padding: .05rem .38rem; border-radius: .4rem; background: rgb(255 255 255 / .14); box-shadow: inset 0 -2px 0 rgb(0 0 0 / .2); font: inherit; font-size: .82em; font-weight: 600; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
