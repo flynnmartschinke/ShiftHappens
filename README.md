@@ -1,18 +1,32 @@
-# OverRostered
+# Shift Happens!
 
-A low-poly browser game about filling the Friday-night café roster. Play solo or share a keyboard with a second coordinator.
+Overcooked, but for rostering. A duck and a bunny race around a cosy office signing staff on, passing them over the counter and pinning them onto the weekly roster before the clock runs out. Every staff member has a role, days they can work and a number of shifts, so a finished round is a real roster you can copy and use.
 
-[Play Shift Happens!](https://vetematts.github.io/ShiftHappens/) · [Café demo](https://shift-says-back.drybee16.chatgpt.site)
+**[Play it now](https://vetematts.github.io/ShiftHappens/)** on a laptop or a phone.
 
-## Shift Happens! playtest
+Made for the Tanda Hackathon 2026 by [Matt](https://github.com/vetematts), [Edward Li](https://github.com/eli0118999), [Flynn Martschinke](https://github.com/flynnmartschinke) and [Harsha](https://github.com/hvarma029).
 
-After starting the local server, open `/shift-happens` for the separate office game. Two players share one keyboard. Player 1 uses **WASD** and **Space**. Player 2 uses the **arrow keys** and **Enter**. Staff wait at the table, each wearing a cap in their role colour (barista, kitchen or register). Their name tag shows the days they can work and the shifts they have left. Grab someone, hold the action key at the manager’s desk to sign them on (once per person), pass them over the counter, then stand at a day on the board and roster them onto a shift that matches their role on a day they can work. Nobody works two shifts in one day. After a shift they head home and come back while they have hours left. Sick calls knock people off the board, so refill those shifts too. Cover every needed shift before 3:00 runs out, then copy the finished roster from the end screen.
+## How to play
 
-**Quick play** uses a sample café team. **Run it for real** lets you enter your own staff (name, role, days, shifts) and the shifts the week needs. It warns about any shift nobody can work and saves the team on that device.
+1. Staff wait at the table, each wearing a cap in their role colour: barista (pink), kitchen (orange) or register (teal). Their name tag shows the days they can work and the shifts they have left.
+2. Grab someone and hold the action button at the manager's desk to sign them on.
+3. Pass them over the counter to your teammate.
+4. Stand at a day on the board and roster them onto an open shift that matches their role, on a day they can work. Nobody works two shifts in one day.
+5. After a shift they head home and come back while they have hours left. Sick calls knock people off the board, so refill those shifts too.
 
-Playing alone? Press **Q**, or the swap button on a phone, to switch between the duck and the bunny. Want phones as gamepads instead? See [Phones as controllers](#phones-as-controllers-jackbox-style). On a phone, Player 1 moves with the thumb stick and uses the round action button. The office lowers its detail automatically on slower devices. Add `?quality=high` or `?quality=low` to the address to fix the detail level.
+Cover every shift before 3:00 runs out to win. The end screen shows the finished roster with a **Copy roster** button.
 
-### Phones as controllers (Jackbox-style)
+| | Move | Action |
+| --- | --- | --- |
+| Duck (Player 1) | WASD | Space |
+| Bunny (Player 2) | Arrow keys | Enter |
+| Phone browser | Thumb stick | Action button |
+
+Playing alone? Press **Q**, or the swap button on a phone, to switch between the duck and the bunny.
+
+**Quick play** uses a sample café team. **Run it for real** lets you enter your own staff (name, role, days and shifts) and the shifts your week needs. It warns about any shift nobody can work and saves the team on that device.
+
+## Phones as controllers (Jackbox-style)
 
 Like a Jackbox party game, the laptop or projector shows the game and phones become the gamepads. Nobody installs anything.
 
@@ -29,33 +43,36 @@ Extra phones wait and take over a critter as soon as a phone leaves. The keyboar
 
 **Testing without phones.** Add `?link=local` to the laptop's address and select the phones button. Then open `index.html#join-CODE-local` in other tabs of the same browser, with the room code in place of `CODE`. The tabs talk through the browser instead of the network.
 
-### Publish the shared-keyboard demo
+## Run it yourself
 
-Run `npm run build:demo` to generate the static site in `out/shift-happens`. You can serve that directory with any static web host.
-
-GitHub Pages publishes the office game automatically after every push to `main`, including merged pull requests. It needs **GitHub Actions** selected once under **Settings → Pages → Source**. To republish without a new commit, open **Actions**, select **Publish Shift Happens demo** and run it from `main`. The workflow uploads only the static game, and the phone controllers need nothing else. [GitHub Pages setup](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)
-
-## How to play
-
-Start a round, talk to an available worker, and lead them to an empty station. Jo can cover Grill or Pass, Rae can cover Pass or Floor, and Kit can cover Floor. Pick carefully and use **Undo** to move someone out of a slot. You win by filling all four stations within 65 seconds while keeping everyone within the fictional 40-hour limit.
-
-- Player 1 uses **WASD** and **E**.
-- Player 2 joins with the **arrow keys** and uses **Enter** to interact.
-- Tap a destination and the action button to play with touch.
-
-The staff view shares the same fictional roster. Staff replies are scripted.
-
-## Run locally
-
-Use Node.js 22.13 or newer. From this folder run:
+Use Node.js 22.13 or newer.
 
 ```sh
 npm ci
-npm run build
-npm run db:init
-npm start
+npm run dev        # local server that reloads as you edit
+npm run build      # static site in dist/
+npm run preview    # serve the build locally
+npm run typecheck
+npm run lint
 ```
 
-Run `db:init` once per checkout to create the local Cloudflare D1 table. Open the loopback URL printed by Wrangler. Browser graphics use WebGL 2.
+The office lowers its detail automatically on slower devices. Add `?quality=high` or `?quality=low` to the address to fix the detail level.
 
-For later code changes, run `npm run build` and restart `npm start`. The publishing checkout for the public demo is separate. GitHub pushes do not automatically publish a new live version.
+## How it's built
+
+React and Vite for the page, Three.js for the 3D office, and no backend. The rules are plain TypeScript with no rendering, and the 3D world only reads the game state each frame, so gameplay can change without touching the graphics.
+
+| File | What it does |
+| --- | --- |
+| `src/round.ts` | All the rules: the team, the week, signing on, rostering, sick calls, collisions, and the timings in `settings` |
+| `src/office-world.ts` | The Three.js office, critters, staff, board and effects |
+| `src/shift-happens.tsx` | The game screen: input, score, start and end screens, and the phone lobby |
+| `src/team-setup.tsx` | The **Run it for real** form, saved in the browser |
+| `src/phone-link.ts` | Room codes, join links and the peer-to-peer link for phones |
+| `src/phone-controller.tsx` | The gamepad a phone shows after scanning the QR code |
+| `src/play-qr.tsx` | QR codes |
+| `src/sound.ts` | Sound effects, synthesised in the browser |
+
+## Publishing
+
+GitHub Pages publishes the game after every push to `main`. The same workflow checks types and lint on pushes and pull requests, without holding back the live game. It needs **GitHub Actions** selected once under **Settings → Pages → Source**. To republish without a new commit, open **Actions**, select **Publish Shift Happens** and run it from `main`.

@@ -1,5 +1,3 @@
-"use client";
-
 import type { CSSProperties } from "react";
 import { checkTeam, days, roleOf, roles, sampleTeam, shifts, type Person, type Role, type Team } from "./round";
 

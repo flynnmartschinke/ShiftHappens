@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useEffectEvent, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent } from "react";
 import { createOfficeWorld } from "./office-world";
 import {

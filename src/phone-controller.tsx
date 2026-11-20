@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
 import { openLink, type HostMessage, type Link } from "./phone-link";
 

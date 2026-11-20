@@ -1,0 +1,15 @@
+/* Page basics: reset, type and default buttons. The game's own look is in shift-happens.css. */
+:root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #11151c; color: #f4f6fb; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 280px; background: radial-gradient(ellipse at 50% 0%, #1d2840, #11151c 70%); min-height: 100vh; }
+main { max-width: 42rem; margin: 0 auto; padding: 2rem clamp(1rem, 6vw, 3rem) 3rem; }
+h1, h2, h3, p { margin: 0; }
+h1 { font-size: clamp(2rem, 8vw, 3rem); line-height: 1.06; letter-spacing: -.055em; margin: 2rem 0 1.25rem; }
+h2 { font-size: 1.4rem; letter-spacing: -.035em; margin: .2rem 0; }
+h3 { font-size: 1rem; }
+p { color: #c3c9d7; line-height: 1.45; }
+a { color: inherit; text-decoration: none; }
+button { font: inherit; font-weight: 650; color: #172e26; background: #b7ebd0; border: 1px solid transparent; border-radius: .65rem; padding: .6rem .85rem; min-height: 44px; cursor: pointer; }
+button:hover:not(:disabled) { filter: brightness(1.12); }
+button:disabled { opacity: .55; cursor: wait; }
+button:focus-visible, a:focus-visible { outline: 2px solid #b7ebd0; outline-offset: 3px; }
