@@ -1,4 +1,4 @@
-export type Cue = "spawn" | "pick" | "put" | "approve" | "pin" | "rush" | "win" | "lose";
+export type Cue = "spawn" | "pick" | "put" | "approve" | "pin" | "rush" | "win" | "lose" | "swap";
 
 const storageKey = "shift-happens-muted";
 
@@ -75,6 +75,10 @@ export function createSound() {
     },
     win: () => [523, 659, 784, 1047].forEach((tone, i) => note(tone, i * 0.11, 0.32, "triangle", 0.12)),
     lose: () => [392, 330, 262].forEach((tone, i) => note(tone, i * 0.18, 0.34, "triangle", 0.1)),
+    swap: () => {
+      note(620, 0, 0.07, "sine", 0.08, 930);
+      note(930, 0.06, 0.08, "sine", 0.06, 1240);
+    },
   };
 
   return {

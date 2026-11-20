@@ -688,6 +688,20 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
     return sprite;
   });
 
+  // A bouncing arrow over the critter one person is controlling
+  const markerGeometry = new T.ConeGeometry(.2, .36, 20);
+  geometries.push(markerGeometry);
+  const markers = playerColours.map(look => {
+    const surface = new T.MeshBasicMaterial({ color: look.ring, toneMapped: false, depthTest: false });
+    ownMaterials.push(surface);
+    const mesh = new T.Mesh(markerGeometry, surface);
+    mesh.rotation.x = Math.PI;
+    mesh.renderOrder = 6;
+    mesh.visible = false;
+    scene.add(mesh);
+    return mesh;
+  });
+
   // Stamp progress rings
   const ringSteps = Array.from({ length: 25 }, (_, step) => {
     const geometry = new T.RingGeometry(.2, .3, 40, 1, Math.PI / 2, Math.max(.001, step / 24) * Math.PI * 2);
@@ -1126,7 +1140,7 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
     renderer.render(scene, camera);
   }
 
-  function draw(round: Round) {
+  function draw(round: Round, focus: number | null = null) {
     const time = performance.now();
     const now = (time - clockStart) / 1000;
     const elapsed = Math.max(0, (time - lastTime) / 1000);
@@ -1179,7 +1193,15 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
     updatePool(confetti, dt, false);
     updatePool(puffs, dt, true);
 
-    const follow = T.MathUtils.clamp(round.players[0].position.x, -maxPan, maxPan);
+    markers.forEach((marker, i) => {
+      marker.visible = focus === i && round.phase === "playing";
+      if (!marker.visible) return;
+      const player = round.players[i];
+      const lift = still ? 0 : Math.abs(Math.sin(now * 5)) * .18;
+      marker.position.set(player.position.x, (player.carrying ? 3.75 : 2.75) + lift, player.position.z);
+    });
+
+    const follow = T.MathUtils.clamp(round.players[focus ?? 0].position.x, -maxPan, maxPan);
     pan += (follow - pan) * (1 - Math.exp(-dt * 4));
     camera.position.copy(basePosition);
     camera.position.x += pan;

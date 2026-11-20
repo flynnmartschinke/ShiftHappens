@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { useEffect, useEffectEvent, useRef, useState, type PointerEvent } from "react";
 import { createOfficeWorld } from "./office-world";
 import {
   beginRound, days, filledShifts, interact, newRound, nextAction, settings, shifts, stepRound, stopStamp, walk,
@@ -12,7 +12,9 @@ const keyboards = [
   { up: "KeyW", left: "KeyA", down: "KeyS", right: "KeyD", use: "Space", guide: "WASD", action: "Space" },
   { up: "ArrowUp", left: "ArrowLeft", down: "ArrowDown", right: "ArrowRight", use: "Enter", guide: "↑ ← ↓ →", action: "Enter" },
 ];
-const gameKeys = keyboards.flatMap(({ up, left, down, right, use }) => [up, left, down, right, use]);
+const swapKey = "KeyQ";
+const gameKeys = [...keyboards.flatMap(({ up, left, down, right, use }) => [up, left, down, right, use]), swapKey];
+const critterNames = ["duck", "bunny"];
 const stickReach = 46;
 
 function clock(seconds: number) {
@@ -43,6 +45,12 @@ export default function ShiftHappens() {
   const stick = useRef({ x: 0, y: 0, pointer: -1, originX: 0, originY: 0 });
   const knob = useRef<HTMLSpanElement>(null);
   const sound = useRef<Sound | null>(null);
+  // Player 1's controls (WASD, Space and the touch controls) drive this critter. Swapping lets one person play both.
+  const active = useRef(0);
+  // Which critter to mark and follow: always on touch screens, and on keyboards once someone swaps.
+  const focus = useRef<number | null>(null);
+  const holding = useRef(new Map<string, number>());
+  const [lead, setLead] = useState(0);
   const [view, setView] = useState(() => snapshot(newRound()));
   const [graphics, setGraphics] = useState<"loading" | "ready" | "failed">("loading");
   const [muted, setMuted] = useState(false);
@@ -51,14 +59,41 @@ export default function ShiftHappens() {
     sound.current?.unlock();
     if (round.current.phase !== "playing" || keys.current.has(code)) return;
     keys.current.add(code);
-    const player = keyboards.findIndex(control => control.use === code);
-    if (player !== -1) interact(round.current, player);
+    if (code === swapKey) {
+      swap();
+      return;
+    }
+    const control = keyboards.findIndex(entry => entry.use === code);
+    if (control === -1) return;
+    const critter = control === 0 ? active.current : 1;
+    holding.current.set(code, critter);
+    interact(round.current, critter);
   }
 
   function release(code: string) {
     if (!keys.current.delete(code)) return;
-    const player = keyboards.findIndex(control => control.use === code);
-    if (player !== -1) stopStamp(round.current.players[player]);
+    const critter = holding.current.get(code);
+    holding.current.delete(code);
+    if (critter !== undefined) stopStamp(round.current.players[critter]);
+  }
+
+  // Keyboard listeners live in an effect, so they reach the latest press and release through effect events.
+  const onKeyDown = useEffectEvent((code: string) => press(code));
+  const onKeyUp = useEffectEvent((code: string) => release(code));
+
+  function swap() {
+    if (round.current.phase !== "playing") return;
+    const previous = active.current;
+    holding.current.forEach((critter, code) => {
+      if (critter !== previous || code !== keyboards[0].use) return;
+      stopStamp(round.current.players[critter]);
+      holding.current.delete(code);
+      keys.current.delete(code);
+    });
+    active.current = 1 - previous;
+    focus.current = active.current;
+    setLead(active.current);
+    sound.current?.play("swap");
   }
 
   useEffect(() => {
@@ -66,6 +101,7 @@ export default function ShiftHappens() {
     if (!viewport) return;
     const effects = createSound();
     sound.current = effects;
+    if (window.matchMedia("(pointer: coarse)").matches) focus.current = 0;
     // Sync the saved preference after mount, so server and client render the same markup first.
     setMuted(effects.muted);
     let world: ReturnType<typeof createOfficeWorld> | undefined;
@@ -80,20 +116,22 @@ export default function ShiftHappens() {
       const seconds = Math.max(0, (now - previous) / 1000);
       previous = now;
       if (state.phase === "playing" && world) {
+        const moves = state.players.map(() => ({ across: 0, downward: 0 }));
+        const pressed = keys.current;
         keyboards.forEach(({ up, left, down, right }, i) => {
-          const pressed = keys.current;
-          let across = Number(pressed.has(right)) - Number(pressed.has(left));
-          let downward = Number(pressed.has(down)) - Number(pressed.has(up));
-          if (i === 0) {
-            across += stick.current.x;
-            downward += stick.current.y;
-          }
+          const move = moves[i === 0 ? active.current : 1];
+          move.across += Number(pressed.has(right)) - Number(pressed.has(left));
+          move.downward += Number(pressed.has(down)) - Number(pressed.has(up));
+        });
+        moves[active.current].across += stick.current.x;
+        moves[active.current].downward += stick.current.y;
+        moves.forEach(({ across, downward }, i) => {
           const [dx, dz] = world!.toWorld(across, downward);
           walk(state, i, Math.abs(dx) < 1e-6 ? 0 : dx, Math.abs(dz) < 1e-6 ? 0 : dz, Math.min(.05, seconds));
         });
         stepRound(state, seconds);
       }
-      world?.draw(state);
+      world?.draw(state, focus.current);
       const changed = displayedRound !== state || displayedPhase !== state.phase;
       if (changed || (state.phase === "playing" && now - lastUi >= 80)) {
         setView(snapshot(state));
@@ -108,13 +146,14 @@ export default function ShiftHappens() {
       if (!gameKeys.includes(event.code) || round.current.phase !== "playing" || event.metaKey || event.altKey || event.ctrlKey) return;
       if (event.target instanceof HTMLElement && event.target.closest("a, button, input")) return;
       event.preventDefault();
-      if (!event.repeat) press(event.code);
+      if (!event.repeat) onKeyDown(event.code);
     }
     function keyup(event: KeyboardEvent) {
-      release(event.code);
+      onKeyUp(event.code);
     }
     function clearKeys() {
       keys.current.clear();
+      holding.current.clear();
       stick.current = { ...stick.current, x: 0, y: 0, pointer: -1 };
       round.current.players.forEach(stopStamp);
     }
@@ -146,6 +185,10 @@ export default function ShiftHappens() {
   function start() {
     sound.current?.unlock();
     keys.current.clear();
+    holding.current.clear();
+    active.current = 0;
+    if (focus.current !== null) focus.current = 0;
+    setLead(0);
     const state = newRound();
     beginRound(state);
     round.current = state;
@@ -200,7 +243,7 @@ export default function ShiftHappens() {
   }
 
   const urgent = view.time <= 20 && view.phase === "playing";
-  const solo = view.players[0];
+  const solo = view.players[lead];
 
   return (
     <main className="shifts">
@@ -240,6 +283,11 @@ export default function ShiftHappens() {
               <span ref={knob} />
             </div>
             <div className="shifts-action">
+              <button type="button" className="shifts-swap" onPointerDown={event => { event.preventDefault(); swap(); }}
+                aria-label={`Switch to the ${critterNames[1 - lead]}`}>
+                <span aria-hidden="true">{lead === 0 ? "🐰" : "🐥"}</span>
+                <small>Swap</small>
+              </button>
               {solo.carrying && (
                 <b className={solo.approved ? "shifts-approved" : "shifts-request"}>{solo.carrying}{solo.approved ? " ✓" : ""}</b>
               )}
@@ -259,6 +307,7 @@ export default function ShiftHappens() {
                 <>
                   <h2>Cover the week</h2>
                   <p>Grab requests from the inbox. Stamp them at the manager’s desk. Pass them over the counter and pin them to the roster.</p>
+                  <p className="shifts-tip">Playing alone? Swap between the duck and the bunny with <kbd>Q</kbd> or the swap button.</p>
                   <button disabled={graphics !== "ready"} onClick={start}>Start round</button>
                 </>
               ) : (
@@ -275,12 +324,17 @@ export default function ShiftHappens() {
 
       <div className="shifts-controls" aria-label="Player controls">
         {keyboards.map(({ guide, action }, i) => {
-          const player = view.players[i];
+          // Player 1's keys follow whichever critter they have swapped to.
+          const critter = i === 0 ? lead : 1;
+          const player = view.players[critter];
           return (
-            <section className="shifts-player" key={action} aria-label={`Player ${i + 1}`}>
-              <strong className="shifts-player-tag">P{i + 1}</strong>
+            <section className="shifts-player" key={action} aria-label={`Player ${i + 1}, controlling the ${critterNames[critter]}`}>
+              <strong className="shifts-player-tag" data-critter={critter}>P{critter + 1}</strong>
               <div>
-                <div className="shifts-keys"><kbd>{guide}</kbd> <kbd>{action}</kbd></div>
+                <div className="shifts-keys">
+                  <kbd>{guide}</kbd> <kbd>{action}</kbd>
+                  {i === 0 && <> · <kbd>Q</kbd> swap</>}
+                </div>
                 {view.phase === "playing" && (
                   <div className="shifts-prompt">
                     {player.carrying && <span className={player.approved ? "shifts-approved" : "shifts-request"}>{player.carrying}{player.approved ? " ✓" : ""}</span>}
@@ -288,7 +342,7 @@ export default function ShiftHappens() {
                   </div>
                 )}
               </div>
-              {player.stamping && <progress aria-label={`Player ${i + 1} approval progress`} value={player.stamp} max={1} />}
+              {player.stamping && <progress aria-label={`The ${critterNames[critter]}’s approval progress`} value={player.stamp} max={1} />}
             </section>
           );
         })}
