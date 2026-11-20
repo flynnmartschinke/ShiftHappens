@@ -4,6 +4,16 @@ A low-poly browser game about filling the Friday-night café roster. Play solo o
 
 [Play the live demo](https://shift-says-back.drybee16.chatgpt.site)
 
+## Shift Happens! playtest
+
+After starting the local server, open `/shift-happens` for the separate office game. Two players share one keyboard. Player 1 uses **WASD** and **Space**. Player 2 uses the **arrow keys** and **Enter**. Hold the action key at the manager’s desk to approve a request, set it on a counter pad, then pick it up from the other side and pin it at the board. Fill all 14 weekly shifts before 2:00 runs out.
+
+### Publish the shared-keyboard demo
+
+Run `npm run build:demo` to generate the static site in `out/shift-happens`. You can serve that directory with any static web host.
+
+For GitHub Pages, select **GitHub Actions** under **Settings → Pages → Source**. Open **Actions**, select **Publish Shift Happens demo**, then run it from `main`. The workflow uploads only the static game. Hosting from a private repo requires GitHub Pro or another eligible plan. Online rooms will need a server to synchronise play. [GitHub Pages setup](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)
+
 ## How to play
 
 Start a round, talk to an available worker, and lead them to an empty station. Jo can cover Grill or Pass, Rae can cover Pass or Floor, and Kit can cover Floor. Pick carefully and use **Undo** to move someone out of a slot. You win by filling all four stations within 65 seconds while keeping everyone within the fictional 40-hour limit.
