@@ -1,27 +1,47 @@
 export const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
 
-export const roles = [
-  { id: "barista", label: "Barista", colour: "#ff7aa8" },
-  { id: "kitchen", label: "Kitchen", colour: "#ffa53d" },
-  { id: "register", label: "Register", colour: "#3ec7b4" },
-] as const;
-export type Role = typeof roles[number]["id"];
-export const roleOf = (role: Role) => roles.find(entry => entry.id === role)!;
+/** Colours handed out to roles in order. Caps, name tags and board slots use them. */
+export const roleColours = ["#ff7aa8", "#ffa53d", "#3ec7b4", "#7c8cff"];
+/** A job on the team, such as barista or dentist. */
+export type Role = { id: string; label: string; colour: string };
+export const maxRoles = 4;
+/** The most people one shift can need, so the board stays readable. */
+export const maxPerShift = 4;
 
-/** The 14 slots of a week: Monday to Sunday mornings, then Monday to Sunday evenings. */
-export const shifts = (["AM", "PM"] as const).flatMap(half =>
-  days.map((day, i) => ({ day, dayIndex: i, half, label: `${day} ${half}` })),
-);
+/** The 14 shifts of a week: Monday to Sunday first shifts, then Monday to Sunday second shifts. */
+export const shifts = [0, 1].flatMap(half => days.map((day, dayIndex) => ({ day, dayIndex, half })));
 
-/** Someone on the team, as entered in "Run it for real". */
-export type Person = { name: string; role: Role; days: boolean[]; shifts: number };
-/** A team plus the role each shift needs (null when that shift isn't needed). */
-export type Team = { people: Person[]; week: (Role | null)[] };
+/** Someone on the team. */
+export type Person = { name: string; role: string; days: boolean[]; shifts: number };
+
+/** Everything needed to roster a week: the roles, the people and how many of each role every shift needs. */
+export type Team = {
+  /** Which starting point this came from (cafe, dental, salon or blank). */
+  kind: string;
+  roles: Role[];
+  /** What the two shifts in a day are called, such as AM and PM or 8–12 and 1–5. */
+  shiftNames: [string, string];
+  /** How many shifts one person can work in a day: 1, or 2 when people work full days. */
+  perDay: 1 | 2;
+  people: Person[];
+  /** For each of the 14 shifts, how many people of each role (by id) it needs. */
+  needs: Record<string, number>[];
+};
+
+/** One place to fill on the board: a role on a shift. */
+export type Slot = { shift: number; role: string };
 
 const workdays = (...list: number[]) => days.map((_, i) => list.includes(i));
+const allShifts = (need: (shift: number, day: number, half: number) => Record<string, number>) =>
+  shifts.map(({ dayIndex, half }, shift) => need(shift, dayIndex, half));
+const role = (id: string, label: string, colour: number): Role => ({ id, label, colour: roleColours[colour] });
 
 /** The café team used for quick play. There's enough slack that random choices still finish the week about 98% of the time. */
 export const sampleTeam: Team = {
+  kind: "cafe",
+  roles: [role("barista", "Barista", 0), role("kitchen", "Kitchen", 1), role("register", "Register", 2)],
+  shiftNames: ["AM", "PM"],
+  perDay: 1,
   people: [
     { name: "Jo", role: "barista", days: workdays(0, 1, 2, 3, 4), shifts: 3 },
     { name: "Rae", role: "barista", days: workdays(2, 3, 4, 5, 6), shifts: 3 },
@@ -35,11 +55,83 @@ export const sampleTeam: Team = {
     { name: "Bea", role: "register", days: workdays(1, 2, 3, 5, 6), shifts: 3 },
     { name: "Max", role: "register", days: workdays(0, 1, 2, 3, 4, 5, 6), shifts: 2 },
   ],
-  week: [
+  needs: [
     "barista", "kitchen", "register", "barista", "kitchen", "register", "barista",
     "kitchen", "register", "barista", "kitchen", "register", "barista", "kitchen",
-  ],
+  ].map(id => ({ [id]: 1 })),
 };
+
+const weekdays = workdays(0, 1, 2, 3, 4);
+
+/** Starting points for "Roster my team". Each is a full week that random choices still finish over 90% of the time, ready to edit. */
+export const templates: { id: string; label: string; blurb: string; icon: string; team: Team }[] = [
+  { id: "cafe", label: "Café", blurb: "Baristas, kitchen and register, open every day", icon: "☕", team: sampleTeam },
+  {
+    id: "dental", label: "Dental clinic", blurb: "Dentists, assistants and reception, weekdays", icon: "🦷",
+    team: {
+      kind: "dental",
+      roles: [role("dentist", "Dentist", 3), role("assistant", "Assistant", 2), role("reception", "Reception", 0)],
+      shiftNames: ["8–12", "1–5"],
+      perDay: 2,
+      people: [
+        { name: "Dr Lee", role: "dentist", days: workdays(0, 1, 2, 3), shifts: 8 },
+        { name: "Dr Patel", role: "dentist", days: workdays(1, 2, 3, 4), shifts: 8 },
+        { name: "Dr Wu", role: "dentist", days: workdays(0, 4), shifts: 4 },
+        { name: "Mia", role: "assistant", days: weekdays, shifts: 8 },
+        { name: "Noah", role: "assistant", days: weekdays, shifts: 8 },
+        { name: "Ivy", role: "assistant", days: workdays(0, 2, 4), shifts: 6 },
+        { name: "Zoe", role: "reception", days: weekdays, shifts: 8 },
+        { name: "Tom", role: "reception", days: weekdays, shifts: 8 },
+      ],
+      needs: allShifts((_, day): Record<string, number> => (day < 5 ? { dentist: 1, assistant: 1, reception: 1 } : {})),
+    },
+  },
+  {
+    id: "salon", label: "Hair salon", blurb: "Stylists and apprentices, busy Saturdays", icon: "💇",
+    team: {
+      kind: "salon",
+      roles: [role("stylist", "Stylist", 0), role("apprentice", "Apprentice", 1)],
+      shiftNames: ["9–1", "1–6"],
+      perDay: 2,
+      people: [
+        { name: "Kim", role: "stylist", days: workdays(1, 2, 3, 4, 5), shifts: 8 },
+        { name: "Ash", role: "stylist", days: workdays(1, 2, 3, 4, 5), shifts: 6 },
+        { name: "Lou", role: "stylist", days: workdays(2, 3, 4, 5), shifts: 6 },
+        { name: "Bo", role: "stylist", days: workdays(4, 5), shifts: 4 },
+        { name: "Pip", role: "apprentice", days: workdays(1, 2, 3, 4, 5), shifts: 8 },
+        { name: "Ren", role: "apprentice", days: workdays(1, 2, 3, 4, 5), shifts: 6 },
+      ],
+      needs: allShifts((_, day): Record<string, number> =>
+        (day === 5 ? { stylist: 2, apprentice: 1 } : day >= 1 && day <= 4 ? { stylist: 1, apprentice: 1 } : {})),
+    },
+  },
+  {
+    id: "blank", label: "Start from scratch", blurb: "Name your own roles and shifts", icon: "✏️",
+    team: {
+      kind: "blank",
+      roles: [role("staff", "Staff", 0)],
+      shiftNames: ["AM", "PM"],
+      perDay: 1,
+      people: [],
+      needs: shifts.map(() => ({})),
+    },
+  },
+];
+
+/** A role by id, or a grey stand-in if the team no longer has it. */
+export function roleIn(roles: Role[], id: string): Role {
+  return roles.find(entry => entry.id === id) ?? { id, label: "Unknown", colour: "#9b8b7a" };
+}
+
+export const shiftLabel = (shiftNames: [string, string], shift: number) =>
+  `${days[shift % 7]} ${shiftNames[shift < 7 ? 0 : 1]}`;
+
+/** Every place to fill this week, in board order: shift by shift, roles in team order. */
+export function slotsOf(team: Team): Slot[] {
+  return shifts.flatMap((_, shift) => team.roles.flatMap(({ id }) =>
+    Array.from({ length: Math.max(0, Math.floor(team.needs[shift]?.[id] ?? 0)) }, () => ({ shift, role: id })),
+  ).slice(0, maxPerShift));
+}
 
 /** Short form of someone's working days, such as "Mon–Fri" or "Mon, Wed–Thu". */
 export function dayRange(list: boolean[]) {
@@ -54,13 +146,17 @@ export function dayRange(list: boolean[]) {
   return parts.join(", ") || "No days";
 }
 
-/** For each needed shift, who on the team could work it. Used to warn about gaps before playing. */
+/** Problems to fix before playing: places nobody could fill, and roles without enough shifts between them. */
 export function checkTeam(team: Team) {
-  const gaps = team.week.map((role, slot) => role && !team.people.some(person =>
-    person.role === role && person.days[slot % 7] && person.shifts > 0) ? slot : -1).filter(slot => slot >= 0);
-  const needed = team.week.filter(Boolean).length;
-  const hours = team.people.reduce((sum, person) => sum + Math.max(0, person.shifts), 0);
-  return { gaps, needed, hours };
+  const slots = slotsOf(team);
+  const gaps = slots.filter(({ shift, role: id }) => !team.people.some(person =>
+    person.role === id && person.days[shift % 7] && person.shifts > 0));
+  const short = team.roles.map(({ id, label }) => {
+    const need = slots.filter(slot => slot.role === id).length;
+    const have = team.people.filter(person => person.role === id).reduce((sum, person) => sum + Math.max(0, person.shifts), 0);
+    return { id, label, need, have };
+  }).filter(({ need, have }) => need > have);
+  return { slots, gaps, short, needed: slots.length };
 }
 
 export const settings = {
@@ -162,11 +258,17 @@ export type Player = {
 export type Round = {
   phase: "ready" | "playing" | "won" | "lost";
   elapsed: number;
+  /** Round length in seconds: three minutes, longer for big real rosters. */
+  duration: number;
   nextSpawn: number;
   nextSick: number;
-  week: (Role | null)[];
+  roles: Role[];
+  shiftNames: [string, string];
+  perDay: 1 | 2;
+  /** Every place to fill this week. */
+  slots: Slot[];
   staff: Staff[];
-  /** Who is rostered on each of the 14 shifts, by staff id. */
+  /** Who is in each slot, by staff id. */
   board: (number | undefined)[];
   players: Player[];
   /** Latest office news for the interface, such as a sick call. */
@@ -175,17 +277,23 @@ export type Round = {
 };
 
 export function newRound(team: Team = sampleTeam, custom = false): Round {
+  const slots = slotsOf(team);
   return {
     phase: "ready",
     elapsed: 0,
+    // About eight seconds a place, never under the usual three minutes or over ten
+    duration: Math.min(600, Math.max(settings.duration, Math.ceil(slots.length * .8) * 10)),
     nextSpawn: 0,
     nextSick: settings.sickFrom,
-    week: [...team.week],
+    roles: team.roles.map(entry => ({ ...entry })),
+    shiftNames: [...team.shiftNames],
+    perDay: team.perDay,
+    slots,
     staff: team.people.map((person, id) => ({
       ...person, days: [...person.days], id, approved: false, stamp: 0, worked: 0,
       off: days.map(() => false), at: { place: "away" },
     })),
-    board: shifts.map(() => undefined),
+    board: slots.map(() => undefined),
     news: { text: "", until: 0 },
     custom,
     players: [
@@ -195,7 +303,7 @@ export function newRound(team: Team = sampleTeam, custom = false): Round {
   };
 }
 
-/** Who is rostered on each shift, or undefined while it is open or not needed. */
+/** Who is in each slot, or undefined while it is open. */
 export function roster(round: Round) {
   return round.board.map(id => (id === undefined ? undefined : round.staff[id]));
 }
@@ -205,20 +313,27 @@ export function filledShifts(round: Round) {
 }
 
 export function neededShifts(round: Round) {
-  return round.week.filter(Boolean).length;
+  return round.slots.length;
 }
 
-/** Whether this person can take this shift right now. */
+/** The slots this person already fills on a day. */
+const workingOn = (round: Round, person: Staff, day: number) =>
+  round.slots.filter((slot, i) => round.board[i] === person.id && slot.shift % 7 === day);
+
+/** Whether this person can take this slot right now. */
 export function canWork(round: Round, person: Staff, slot: number) {
-  const day = slot % 7;
-  return round.week[slot] === person.role
+  const { shift, role: id } = round.slots[slot];
+  const day = shift % 7;
+  const today = workingOn(round, person, day);
+  return id === person.role
     && round.board[slot] === undefined
     && person.days[day] && !person.off[day]
     && person.worked < person.shifts
-    && round.board[day] !== person.id && round.board[day + 7] !== person.id;
+    && today.length < round.perDay
+    && !today.some(other => other.shift === shift);
 }
 
-const useful = (round: Round, person: Staff) => shifts.some((_, slot) => canWork(round, person, slot));
+const useful = (round: Round, person: Staff) => round.slots.some((_, slot) => canWork(round, person, slot));
 
 // Bring in someone who still has hours and can cover an open shift.
 function arrive(round: Round) {
@@ -232,9 +347,10 @@ function arrive(round: Round) {
   const ready = round.staff.filter(person => person.at.place === "away" && useful(round, person));
   if (!ready.length) {
     const busy = round.staff.some(person => ["tray", "hand", "counter", "floor"].includes(person.at.place) && useful(round, person));
-    const open = round.week.findIndex((role, slot) => role && round.board[slot] === undefined);
-    if (!busy && open >= 0 && round.news.until <= round.elapsed) {
-      round.news = { text: `Nobody left who can work ${shifts[open].label}.`, until: round.elapsed + 4 };
+    const open = round.slots.find((_, slot) => round.board[slot] === undefined);
+    if (!busy && open && round.news.until <= round.elapsed) {
+      const { label } = roleIn(round.roles, open.role);
+      round.news = { text: `Nobody left who can work ${shiftLabel(round.shiftNames, open.shift)} (${label.toLowerCase()}).`, until: round.elapsed + 4 };
     }
     return;
   }
@@ -273,16 +389,22 @@ function sickCall(round: Round) {
   const slot = filled[Math.floor(Math.random() * filled.length)];
   const person = round.staff[round.board[slot]!];
   round.board[slot] = undefined;
-  person.off[slot % 7] = true;
-  person.worked = Math.max(0, person.worked - 1);
+  const day = round.slots[slot].shift % 7;
+  // A sick day empties every shift they had that day
+  round.board.forEach((id, other) => {
+    if (id !== person.id || round.slots[other].shift % 7 !== day) return;
+    round.board[other] = undefined;
+    person.worked = Math.max(0, person.worked - 1);
+  });
+  person.off[day] = true;
   if (person.at.place === "done") person.at = { place: "away" };
-  round.news = { text: `${person.name} called in sick. ${shifts[slot].label} is open again.`, until: round.elapsed + 4 };
+  round.news = { text: `${person.name} called in sick. ${days[day]} needs cover again.`, until: round.elapsed + 4 };
 }
 
 export function stepRound(round: Round, seconds: number) {
   if (round.phase !== "playing") return;
-  round.elapsed = Math.min(settings.duration, round.elapsed + seconds);
-  if (round.elapsed >= settings.duration) {
+  round.elapsed = Math.min(round.duration, round.elapsed + seconds);
+  if (round.elapsed >= round.duration) {
     round.phase = "lost";
     return;
   }
@@ -368,21 +490,27 @@ export function columnAt(point: Point) {
   return Math.max(0, Math.min(6, Math.round(point.x / columnGap + 3)));
 }
 
-/** The open shift in this column that this person can take, if there is one. */
+/** The first open slot in this column that this person can take, if there is one. */
 function slotFor(round: Round, point: Point, person: Staff) {
   const day = columnAt(point);
-  return [day, day + 7].find(slot => canWork(round, person, slot));
+  const index = round.slots.findIndex((slot, i) => slot.shift % 7 === day && canWork(round, person, i));
+  return index === -1 ? undefined : index;
 }
 
 // Explains why the person can't go on this day.
 function boardHint(round: Round, point: Point, person: Staff) {
   const day = columnAt(point);
-  const open = [day, day + 7].filter(slot => round.week[slot] && round.board[slot] === undefined);
+  const open = round.slots.filter((slot, i) => slot.shift % 7 === day && round.board[i] === undefined);
   if (!open.length) return `${days[day]} is covered`;
   if (!person.days[day]) return `${person.name} doesn’t work ${days[day]}`;
   if (person.off[day]) return `${person.name} is off sick ${days[day]}`;
-  if (round.board[day] === person.id || round.board[day + 7] === person.id) return `${person.name} already works ${days[day]}`;
-  return `${days[day]} needs ${open.map(slot => roleOf(round.week[slot]!).label.toLowerCase()).join(" and ")}`;
+  const today = workingOn(round, person, day);
+  if (today.length >= round.perDay) return round.perDay === 1 ? `${person.name} already works ${days[day]}` : `${person.name} already works all ${days[day]}`;
+  const roles = [...new Set(open.map(slot => roleIn(round.roles, slot.role).label.toLowerCase()))];
+  if (open.some(slot => slot.role === person.role)) {
+    return person.worked >= person.shifts ? `${person.name} has no shifts left` : `${person.name} is already on that shift`;
+  }
+  return `${days[day]} needs ${roles.length > 1 ? `${roles.slice(0, -1).join(", ")} and ${roles.at(-1)}` : roles[0]}`;
 }
 
 export function nextAction(round: Round, index: number) {
@@ -395,7 +523,7 @@ export function nextAction(round: Round, index: number) {
   if (atBoard(position)) {
     if (!carrying.approved) return "Sign them on first";
     const slot = slotFor(round, position, carrying);
-    return slot === undefined ? boardHint(round, position, carrying) : `Roster ${carrying.name} on ${shifts[slot].label}`;
+    return slot === undefined ? boardHint(round, position, carrying) : `Roster ${carrying.name} on ${shiftLabel(round.shiftNames, round.slots[slot].shift)}`;
   }
   if (!carrying.approved && atDesk(position)) return "Hold to sign on";
   if (canSeat(round, position)) return "Put back";
