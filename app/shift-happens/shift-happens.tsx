@@ -6,6 +6,7 @@ import {
   beginRound, days, filledShifts, interact, newRound, nextAction, roleOf, roster, settings, shifts, stepRound, stopStamp, walk,
   type Round,
 } from "./round";
+import { PlayQr, playUrl } from "./play-qr";
 import { createSound, type Sound } from "./sound";
 
 const keyboards = [
@@ -352,6 +353,10 @@ export default function ShiftHappens() {
                   <p>New staff are waiting. Sign them on at the manager’s desk, pass them over the counter and put each one on a shift that matches their role. Watch out for sick calls.</p>
                   <p className="shifts-tip">Playing alone? Swap between the duck and the bunny with <kbd>Q</kbd> or the swap button.</p>
                   <button disabled={graphics !== "ready"} onClick={start}>Start round</button>
+                  <div className="shifts-qr">
+                    <PlayQr />
+                    <p><strong>Play on your phone</strong>Scan to open {playUrl.replace("https://", "")}</p>
+                  </div>
                 </>
               ) : (
                 <>

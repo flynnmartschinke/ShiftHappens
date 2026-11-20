@@ -81,6 +81,12 @@ body:has(.shifts) { background: radial-gradient(circle at 50% 0%, #4a3a80, #241b
 .shifts-overlay kbd { padding: .05rem .3rem; border-radius: .3rem; background: #efe7ff; font: inherit; font-weight: 800; }
 @media (pointer: coarse) { .shifts-overlay .shifts-tip kbd { display: none; } }
 
+.shifts-qr { display: flex; align-items: center; gap: .8rem; margin-top: .4rem; padding: .6rem .8rem; border-radius: 1rem; background: #efe7ff; text-align: left; }
+.shifts-qr svg { flex: none; width: 7.5rem; height: 7.5rem; }
+.shifts-overlay .shifts-qr p { display: grid; gap: .15rem; font-size: .78rem; color: #5e5478; overflow-wrap: anywhere; }
+.shifts-qr strong { font-size: 1rem; color: #2a2433; }
+@media (pointer: coarse) { .shifts-qr { display: none; } }
+
 @keyframes shifts-pop { from { transform: scale(.7); opacity: 0; } }
 @keyframes shifts-throb { to { transform: scale(1.04); } }
 @media (prefers-reduced-motion: reduce) {
