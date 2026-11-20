@@ -2,7 +2,7 @@
 
 A low-poly browser game about filling the Friday-night café roster. Play solo or share a keyboard with a second coordinator.
 
-[Play the live demo](https://shift-says-back.drybee16.chatgpt.site)
+[Play Shift Happens!](https://vetematts.github.io/ShiftHappens/) · [Café demo](https://shift-says-back.drybee16.chatgpt.site)
 
 ## Shift Happens! playtest
 
@@ -14,7 +14,7 @@ On a phone, Player 1 moves with the thumb stick and uses the round action button
 
 Run `npm run build:demo` to generate the static site in `out/shift-happens`. You can serve that directory with any static web host.
 
-For GitHub Pages, select **GitHub Actions** under **Settings → Pages → Source**. Open **Actions**, select **Publish Shift Happens demo**, then run it from `main`. The workflow uploads only the static game. Hosting from a private repo requires GitHub Pro or another eligible plan. Online rooms will need a server to synchronise play. [GitHub Pages setup](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)
+GitHub Pages publishes the office game automatically after every push to `main`, including merged pull requests. It needs **GitHub Actions** selected once under **Settings → Pages → Source**. To republish without a new commit, open **Actions**, select **Publish Shift Happens demo** and run it from `main`. The workflow uploads only the static game. Online rooms will need a server to synchronise play. [GitHub Pages setup](https://docs.github.com/en/pages/getting-started-with-github-pages/configuring-a-publishing-source-for-your-github-pages-site)
 
 ## How to play
 
