@@ -1,7 +1,7 @@
 import * as T from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
-import { furniture, nearStation, office, settings, shifts, type Point, type Round } from "./round";
+import { columnX, furniture, nearStation, office, roleOf, roster, settings, shifts, type Point, type Round, type Staff } from "./round";
 import type { Sound } from "./sound";
 
 const colours = {
@@ -21,7 +21,6 @@ const boardY = 1.72;
 const boardZ = -5.36;
 const boardWidth = 15.4;
 const boardHeight = 1.95;
-const columnGap = 2.06;
 const font = (weight: number, size: number) =>
   `${weight} ${size}px ui-rounded, "SF Pro Rounded", Nunito, "Avenir Next", system-ui, sans-serif`;
 
@@ -306,7 +305,7 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
   // Roster board
   rbox(scene, colours.frame, 0, boardY, boardZ - .04, boardWidth + .36, boardHeight + .36, .16, .1);
   const slotOf = (index: number) => ({
-    x: ((index % 7) - 3) * columnGap,
+    x: columnX(index % 7),
     y: boardY + (index < 7 ? .22 : -.5),
   });
   const boardTexture = paint(2048, 260, pen => {
@@ -323,7 +322,7 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
     pen.textAlign = "center";
     pen.textBaseline = "middle";
     ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"].forEach((day, i) => {
-      const x = px((i - 3) * columnGap);
+      const x = px(columnX(i));
       pen.fillStyle = "rgba(255,250,240,.85)";
       pen.beginPath();
       pen.roundRect(x - 64, py(boardY + .76) - 17, 128, 34, 17);
@@ -334,16 +333,19 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
     });
     shifts.forEach((shift, i) => {
       const { x, y } = slotOf(i);
-      pen.setLineDash([12, 9]);
-      pen.lineWidth = 5;
-      pen.strokeStyle = "rgba(107,63,31,.45)";
+      const { colour, label } = roleOf(shift.role);
+      pen.fillStyle = `${colour}40`;
       pen.beginPath();
       pen.roundRect(px(x - .47), py(y + .3), .94 * sx, .6 * sy, 12);
+      pen.fill();
+      pen.setLineDash([12, 9]);
+      pen.lineWidth = 6;
+      pen.strokeStyle = colour;
       pen.stroke();
       pen.setLineDash([]);
-      pen.fillStyle = "rgba(107,63,31,.4)";
-      pen.font = font(800, 24);
-      pen.fillText(shift.half, px(x), py(y));
+      pen.fillStyle = colour;
+      pen.font = font(900, 24);
+      pen.fillText(label.toUpperCase(), px(x), py(y));
     });
     pen.font = font(900, 30);
     pen.fillStyle = "#6b3f1f";
@@ -353,10 +355,13 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
   face(scene, boardTexture, 0, boardY, boardZ + .05, boardWidth, boardHeight);
   const slotGlowGeometry = new RoundedBoxGeometry(1.08, .74, .02, 2, .08);
   geometries.push(slotGlowGeometry);
-  const slotGlows = [0, 1].map(() => {
-    const surface = new T.MeshBasicMaterial({ color: 0xfff27a, transparent: true, opacity: .8, toneMapped: false });
+  // Open shifts glow in their role colour while someone carries a signed-on person of that role
+  const slotGlows = shifts.map((shift, index) => {
+    const surface = new T.MeshBasicMaterial({ color: roleOf(shift.role).colour, transparent: true, opacity: .8, toneMapped: false });
     ownMaterials.push(surface);
     const mesh = new T.Mesh(slotGlowGeometry, surface);
+    const { x, y } = slotOf(index);
+    mesh.position.set(x, y, boardZ + .085);
     mesh.visible = false;
     scene.add(mesh);
     return mesh;
@@ -461,7 +466,7 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
   }
   cylinder(inbox, colours.black, -1.2, 1.1, -.62, .03, .6);
   rbox(inbox, colours.black, -1.2, 1.55, -.64, 1.2, .4, .04, .04);
-  face(inbox, sign("INBOX", "#bfe0ff"), -1.2, 1.55, -.615, 1.15, .36);
+  face(inbox, sign("NEW STAFF", "#bfe0ff"), -1.2, 1.55, -.615, 1.15, .36);
 
   // Manager's desk with a big rubber stamp
   const desk = new T.Group();
@@ -573,67 +578,54 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
   cylinder(floorLamp, 0xfff1b0, 0, 1.62, 0, .3, .32);
   parts.add(floorLamp, new T.Mesh(parts.sphere, bulbGlow), 0, 1.5, 0, .1, .1, .1, false);
 
-  // Shared card shapes
+  // A phone on the desk that rings when someone calls in sick
+  const phone = new T.Group();
+  phone.position.set(-1.45, .91, .25);
+  desk.add(phone);
+  rbox(phone, 0xff7a8a, 0, .06, 0, .42, .12, .3, .05);
+  const handset = new T.Group();
+  handset.position.y = .16;
+  phone.add(handset);
+  rbox(handset, 0xff5c74, 0, 0, 0, .5, .08, .12, .04);
+  ball(handset, 0xff5c74, -.22, .02, 0, .07, .06, .08);
+  ball(handset, 0xff5c74, .22, .02, 0, .07, .06, .08);
+  let ringUntil = 0;
+
+  // Rostered people show as name badges on the board
   const cardBody = new RoundedBoxGeometry(.95, .62, .05, 2, .035);
   const cardFace = new T.PlaneGeometry(.9, .57);
   geometries.push(cardBody, cardFace);
   const cardPaper = parts.material(colours.white, .8);
+  const badgeTextures = new Map<string, T.Texture>();
 
-  function cardTexture(index: number, approved: boolean) {
-    const { day, half } = shifts[index];
-    return paint(256, 162, pen => {
-      pen.fillStyle = approved ? "#eafcf0" : "#eaf5ff";
+  function badgeTexture(person: Staff) {
+    const key = `${person.name}|${person.role}`;
+    const cached = badgeTextures.get(key);
+    if (cached) return cached;
+    const { colour, label } = roleOf(person.role);
+    const texture = paint(256, 162, pen => {
+      pen.fillStyle = "#fffdf8";
       pen.beginPath();
       pen.roundRect(0, 0, 256, 162, 18);
       pen.fill();
-      pen.fillStyle = approved ? "#4fc584" : "#6eb7ff";
+      pen.fillStyle = colour;
       pen.beginPath();
-      pen.roundRect(0, 0, 256, 38, [18, 18, 0, 0]);
+      pen.roundRect(0, 0, 256, 40, [18, 18, 0, 0]);
       pen.fill();
       pen.fillStyle = "#ffffff";
-      pen.font = font(900, 22);
+      pen.font = font(900, 24);
       pen.textAlign = "center";
       pen.textBaseline = "middle";
-      pen.fillText(approved ? "APPROVED" : "REQUEST", 128, 20);
+      pen.fillText(label.toUpperCase(), 128, 21);
       pen.fillStyle = "#24324a";
-      pen.font = font(900, 58);
-      pen.fillText(day.toUpperCase(), 108, 98);
-      if (half === "AM") {
-        pen.fillStyle = "#ffbf2e";
-        pen.beginPath();
-        pen.arc(206, 98, 22, 0, Math.PI * 2);
-        pen.fill();
-      } else {
-        pen.fillStyle = "#7d6bd6";
-        pen.beginPath();
-        pen.arc(206, 98, 22, 0, Math.PI * 2);
-        pen.fill();
-        pen.fillStyle = approved ? "#eafcf0" : "#eaf5ff";
-        pen.beginPath();
-        pen.arc(216, 90, 19, 0, Math.PI * 2);
-        pen.fill();
-      }
-      pen.fillStyle = "#5b6478";
-      pen.font = font(800, 24);
-      pen.fillText(half, 206, 142);
-      if (approved) {
-        pen.save();
-        pen.translate(70, 128);
-        pen.rotate(-.25);
-        pen.strokeStyle = "rgba(240,89,95,.85)";
-        pen.lineWidth = 5;
-        pen.beginPath();
-        pen.roundRect(-46, -17, 92, 34, 8);
-        pen.stroke();
-        pen.fillStyle = "rgba(240,89,95,.9)";
-        pen.font = font(900, 22);
-        pen.fillText("OK!", 0, 2);
-        pen.restore();
-      }
+      pen.font = font(900, 62);
+      pen.fillText(person.name, 128, 104, 230);
     });
+    badgeTextures.set(key, texture);
+    return texture;
   }
 
-  const cards = shifts.map((_, index) => {
+  const badges = shifts.map((_, slot) => {
     const group = new T.Group();
     group.visible = false;
     const inner = new T.Group();
@@ -641,18 +633,100 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
     const bodyMesh = new T.Mesh(cardBody, cardPaper);
     bodyMesh.castShadow = true;
     inner.add(bodyMesh);
-    const faces = [cardTexture(index, false), cardTexture(index, true)].map(map => {
-      const surface = new T.MeshStandardMaterial({ map, roughness: .75 });
-      ownMaterials.push(surface);
-      return surface;
-    });
-    const front = new T.Mesh(cardFace, faces[0]);
+    const surface = new T.MeshStandardMaterial({ roughness: .75 });
+    ownMaterials.push(surface);
+    const front = new T.Mesh(cardFace, surface);
     front.position.z = .027;
     inner.add(front);
-    const pin = ball(inner, colours.stampRed, 0, .25, .06, .055, .055, .055, false, .3);
+    ball(inner, colours.stampRed, 0, .25, .06, .055, .055, .055, false, .3);
     scene.add(group);
-    return { group, inner, front, faces, pin, born: 0, popped: 0, wobble: (index * 37 % 11) / 11 - .5 };
+    const { x, y } = slotOf(slot);
+    group.position.set(x, y, boardZ + .16);
+    group.rotation.z = ((slot * 37 % 11) / 11 - .5) * .12;
+    return { group, inner, surface, person: -1, popped: -10, falling: -10, home: new T.Vector3(x, y, boardZ + .16) };
   });
+
+  // Staff are small critters in a hat of their role colour, with a name tag
+  const cylinderGeometry = new T.CylinderGeometry(1, 1, 1, 24);
+  geometries.push(cylinderGeometry);
+  const skinTones = [0xffc8a8, 0xb8e1ff, 0xd7f5b0, 0xffe39a, 0xf2c4ff, 0xc9f1ec, 0xffd0e0, 0xe8d5ff];
+  function makeCrew() {
+    const root = new T.Group();
+    const body = new T.Group();
+    root.add(body);
+    const shadow = new T.Mesh(parts.circle, parts.shadowMaterial);
+    shadow.rotation.x = -Math.PI / 2;
+    shadow.position.y = .03;
+    shadow.scale.setScalar(.5);
+    root.add(shadow);
+    const skin = new T.MeshStandardMaterial({ roughness: .62 });
+    const hat = new T.MeshStandardMaterial({ roughness: .55 });
+    ownMaterials.push(skin, hat);
+    parts.add(body, new T.Mesh(parts.sphere, skin), 0, .42, 0, .36, .38, .33);
+    const head = new T.Group();
+    head.position.set(0, .86, .02);
+    body.add(head);
+    parts.add(head, new T.Mesh(parts.sphere, skin), 0, 0, 0, .34, .31, .31);
+    for (const side of [-1, 1]) {
+      ball(head, colours.white, side * .12, .03, .26, .075, .085, .05, false, .25);
+      ball(head, colours.black, side * .12, .02, .3, .05, .058, .03, false, .2);
+      ball(head, colours.blush, side * .21, -.07, .22, .06, .036, .025, false);
+    }
+    // A cap in the role colour that leaves the face visible from above
+    const crown = parts.add(head, new T.Mesh(parts.sphere, hat), 0, .17, -.07, .33, .2, .31);
+    const brim = parts.add(head, new T.Mesh(cylinderGeometry, hat), 0, .15, .2, .2, .025, .15);
+    crown.castShadow = brim.castShadow = true;
+    const feet = [-1, 1].map(side => ball(body, 0x7a6a8c, side * .14, .06, .08, .1, .055, .14));
+    const tagSurface = new T.SpriteMaterial({ depthTest: false, depthWrite: false });
+    ownMaterials.push(tagSurface);
+    const tag = new T.Sprite(tagSurface);
+    tag.renderOrder = 5;
+    tag.scale.set(.95, .32, 1);
+    tag.position.y = 1.75;
+    root.add(tag);
+    root.scale.setScalar(.8);
+    root.visible = false;
+    scene.add(root);
+    return { root, body, head, feet, skin, hat, tag, key: "", born: 0, popped: -10, facing: 0 };
+  }
+  const crew: ReturnType<typeof makeCrew>[] = [];
+  const tagTextures = new Map<string, T.Texture>();
+
+  function tagTexture(person: Staff) {
+    const key = `${person.name}|${person.role}|${person.approved}`;
+    const cached = tagTextures.get(key);
+    if (cached) return cached;
+    const texture = paint(240, 80, pen => {
+      pen.fillStyle = roleOf(person.role).colour;
+      pen.beginPath();
+      pen.roundRect(4, 4, 232, 72, 30);
+      pen.fill();
+      pen.fillStyle = "#ffffff";
+      pen.font = font(900, 40);
+      pen.textAlign = "center";
+      pen.textBaseline = "middle";
+      pen.fillText(person.approved ? `${person.name} ✓` : person.name, 120, 42, 210);
+    });
+    tagTextures.set(key, texture);
+    return texture;
+  }
+
+  function crewFor(person: Staff) {
+    while (crew.length <= person.id) crew.push(makeCrew());
+    const member = crew[person.id];
+    const key = `${person.name}|${person.role}`;
+    if (member.key !== key) {
+      member.key = key;
+      member.skin.color.setHex(skinTones[(person.name.charCodeAt(0) + person.name.length) % skinTones.length]);
+      member.hat.color.set(roleOf(person.role).colour);
+    }
+    const map = tagTexture(person);
+    if (member.tag.material.map !== map) {
+      member.tag.material.map = map;
+      member.tag.material.needsUpdate = true;
+    }
+    return member;
+  }
 
   // Players
   const critters: Critter[] = [makeCritter("duck", playerColours[0], parts), makeCritter("bunny", playerColours[1], parts)];
@@ -792,10 +866,11 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
 
   // Floating words
   const words = {
-    approve: sign("Approved!", "#5fe39a"),
-    pin: sign("Covered!", "#ffd35c"),
+    approve: sign("Signed on!", "#5fe39a"),
+    pin: sign("Rostered!", "#ffd35c"),
+    sick: sign("Sick call!", "#ff8fb0"),
     rush: sign("Rush hour!", "#ff8fb0"),
-    win: sign("Rostered!", "#ffd35c"),
+    win: sign("Week covered!", "#ffd35c"),
     lose: sign("Time’s up!", "#ff8fb0"),
   };
   const popups = Array.from({ length: 4 }, () => {
@@ -887,13 +962,11 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
   const clockStart = performance.now();
   let lastTime = clockStart;
   let tracked: Round | undefined;
-  let seen: { place: string; approved: boolean; holder: number }[] = [];
+  let seen: { place: string; approved: boolean; holder: number; slot: number }[] = [];
   let lastPhase: Round["phase"] = "ready";
   let rushed = false;
   let stampSlam = 0;
   const target = new T.Vector3();
-  const aim = new T.Quaternion();
-  const tilt = new T.Euler(0, 0, 0, "YXZ");
 
   function near(a: Point, b: Point) {
     return Math.hypot(a.x - b.x, a.z - b.z) <= settings.reach;
@@ -903,59 +976,82 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
     if (index >= 0) critters[index].squashSpeed = amount;
   }
 
+  const snapshotOf = (person: Staff) => ({
+    place: person.at.place,
+    approved: person.approved,
+    holder: person.at.place === "hand" ? person.at.player : -1,
+    slot: person.at.place === "board" ? person.at.slot : -1,
+  });
+
   function track(round: Round, now: number) {
     if (round !== tracked) {
       tracked = round;
-      seen = round.requests.map(card => ({ place: card.at.place, approved: card.approved, holder: card.at.place === "hand" ? card.at.player : -1 }));
-      round.requests.forEach((_, i) => {
-        cards[i].born = now + i * .09;
-        cards[i].group.visible = false;
+      seen = round.staff.map(snapshotOf);
+      crew.forEach(member => (member.root.visible = false));
+      round.staff.forEach((person, i) => {
+        const member = crewFor(person);
+        member.born = now + i * .09;
+        member.root.userData.snap = true;
       });
-      cards.forEach(card => (card.group.userData.snap = true));
+      badges.forEach(badge => {
+        badge.person = -1;
+        badge.falling = -10;
+      });
       lastPhase = round.phase;
       rushed = round.elapsed >= settings.rushAt;
       return;
     }
-    round.requests.forEach((card, i) => {
+    round.staff.forEach((person, i) => {
       const before = seen[i];
-      const holder = card.at.place === "hand" ? card.at.player : -1;
+      const current = snapshotOf(person);
       if (!before) {
-        cards[i].born = now;
-        cards[i].group.userData.snap = true;
+        const member = crewFor(person);
+        member.born = now;
+        member.root.userData.snap = true;
         sound?.play("spawn");
       } else {
-        if (before.place !== card.at.place) {
-          if (card.at.place === "hand") {
-            squash(holder, 5);
+        if (before.place !== person.at.place) {
+          if (person.at.place === "hand") {
+            squash(current.holder, 5);
             sound?.play("pick");
-          } else if (card.at.place === "board") {
+          } else if (person.at.place === "board") {
             squash(before.holder, 6);
-            const slot = slotOf(i);
+            const slot = slotOf(current.slot);
             emit(confetti, { x: slot.x, y: slot.y, z: boardZ + .3 }, 26, { colours: confettiColours, speed: 2.4, up: 3.2, gravity: 7, life: 1.2, size: 1 });
             popup("pin", slot.x, slot.y + .9, boardZ + .5, .9);
             shake = Math.max(shake, .12);
-            cards[i].popped = now;
+            badges[current.slot].popped = now;
             sound?.play("pin");
+          } else if (person.at.place === "gone") {
+            if (before.slot >= 0) {
+              const slot = slotOf(before.slot);
+              badges[before.slot].falling = now;
+              emit(puffs, { x: slot.x, y: slot.y, z: boardZ + .3 }, 8, { colours: [0xff8fb0, 0xfff6e6], speed: 1.2, up: .8, gravity: 0, life: .7, size: .9 });
+              popup("sick", slot.x, slot.y + .9, boardZ + .5, 1);
+            }
+            ringUntil = now + 1.6;
+            shake = Math.max(shake, .1);
+            sound?.play("sick");
           } else {
             squash(before.holder, 4);
-            const at = card.at.place === "counter" ? office.pass[card.at.pad] : card.at.place === "floor" ? card.at.point : office.tray;
-            emit(puffs, { x: at.x, y: card.at.place === "counter" ? 1.05 : .1, z: at.z }, 5, { colours: [0xfff6e6], speed: .9, up: .5, gravity: 0, life: .5, size: .9 });
+            const at = person.at.place === "counter" ? office.pass[person.at.pad] : person.at.place === "floor" ? person.at.point : office.tray;
+            emit(puffs, { x: at.x, y: person.at.place === "counter" ? 1.05 : .1, z: at.z }, 5, { colours: [0xfff6e6], speed: .9, up: .5, gravity: 0, life: .5, size: .9 });
             sound?.play("put");
           }
         }
-        if (!before.approved && card.approved) {
-          squash(holder, 7);
+        if (!before.approved && person.approved) {
+          squash(current.holder, 7);
           stampSlam = 1;
           const at = { x: office.desk.x + .25, y: 1.1, z: office.desk.z + .1 };
           emit(puffs, at, 10, { colours: [0xf0595f, 0xff8fa0], speed: 1.6, up: 1.2, gravity: 0, life: .6, size: .8 });
           emit(confetti, at, 12, { colours: [0x5fe39a, 0xffffff, 0xffd35c], speed: 1.8, up: 3, gravity: 8, life: .9, size: .8 });
           popup("approve", office.desk.x + .3, 3.0, office.desk.z, .95);
-          cards[i].popped = now;
+          crewFor(person).popped = now;
           shake = Math.max(shake, .08);
           sound?.play("approve");
         }
       }
-      seen[i] = { place: card.at.place, approved: card.approved, holder };
+      seen[i] = current;
     });
     if (round.phase === "playing" && !rushed && round.elapsed >= settings.rushAt) {
       rushed = true;
@@ -965,9 +1061,9 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
     if (round.phase !== lastPhase) {
       if (round.phase === "won") {
         for (let i = 0; i < 7; i++) {
-          emit(confetti, { x: (i - 3) * columnGap, y: boardY + .9, z: boardZ + .4 }, 18, { colours: confettiColours, speed: 2.6, up: 4, gravity: 6, life: 1.8, size: 1.1 });
+          emit(confetti, { x: columnX(i), y: boardY + .9, z: boardZ + .4 }, 18, { colours: confettiColours, speed: 2.6, up: 4, gravity: 6, life: 1.8, size: 1.1 });
         }
-        popup("win", 0, 3.4, -1, 1.7);
+        popup("win", 0, 3.4, -1, 1.9);
         sound?.play("win");
       }
       if (round.phase === "lost") {
@@ -978,66 +1074,100 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
     }
   }
 
-  function placeCards(round: Round, now: number, dt: number) {
-    let trayIndex = 0;
-    const carried = new Set<number>();
-    cards.forEach((card, index) => {
-      const request = round.requests[index];
-      if (!request || now < card.born) {
-        card.group.visible = false;
+  function placePeople(round: Round, now: number, dt: number) {
+    const still = reducedMotion.matches;
+    let waiting = 0;
+    round.staff.forEach(person => {
+      const member = crewFor(person);
+      const at = person.at;
+      if (at.place === "board" || at.place === "gone" || now < member.born) {
+        member.root.visible = false;
         return;
       }
-      card.group.visible = true;
-      let flat = true;
-      const at = request.at;
+      member.root.visible = true;
+      let facing = 0;
+      let lift = 0;
       if (at.place === "tray") {
-        target.set(office.tray.x + (trayIndex % 2 - .5) * 1.4, .87 + Math.floor(trayIndex / 4) * .06, office.tray.z + (Math.floor(trayIndex / 2) % 2 - .5) * .66);
-        trayIndex++;
+        target.set(office.tray.x + (waiting % 2 - .5) * 1.4, .81, office.tray.z + (Math.floor(waiting / 2) % 2 - .5) * .62);
+        lift = still ? 0 : Math.max(0, Math.sin(now * 3 + person.id * 1.7)) * .06;
+        waiting++;
       } else if (at.place === "hand") {
         const holder = critters[at.player];
-        target.set(round.players[at.player].position.x, 2.2 + holder.body.position.y * 1.35, round.players[at.player].position.z);
-        flat = false;
-        if (request.approved) carried.add(index);
+        const spot = round.players[at.player].position;
+        target.set(spot.x, 1.95 + holder.body.position.y * 1.35, spot.z);
+        facing = holder.facing;
       } else if (at.place === "counter") {
-        target.set(office.pass[at.pad].x, 1.08, office.pass[at.pad].z);
-      } else if (at.place === "floor") {
-        target.set(at.point.x, .1, at.point.z);
+        target.set(office.pass[at.pad].x, 1.05, office.pass[at.pad].z);
       } else {
-        const slot = slotOf(index);
-        target.set(slot.x, slot.y, boardZ + .16);
+        target.set(at.point.x, 0, at.point.z);
       }
-      if (at.place === "board") tilt.set(0, 0, card.wobble * .12);
-      else if (flat) tilt.set(-Math.PI / 2, yaw + (at.place === "floor" ? card.wobble : 0), 0);
-      else tilt.set(-.62, yaw, 0);
-      aim.setFromEuler(tilt);
-      if (card.group.userData.snap) {
-        card.group.position.copy(target);
-        card.group.quaternion.copy(aim);
-        card.group.userData.snap = false;
+      if (member.root.userData.snap) {
+        member.root.position.copy(target);
+        member.root.userData.snap = false;
       } else {
-        const blend = 1 - Math.exp(-dt * (at.place === "hand" ? 22 : 14));
-        card.group.position.lerp(target, blend);
-        card.group.quaternion.slerp(aim, blend);
+        member.root.position.lerp(target, 1 - Math.exp(-dt * (at.place === "hand" ? 22 : 14)));
       }
-      const front = request.approved ? card.faces[1] : card.faces[0];
-      if (card.front.material !== front) card.front.material = front;
-      card.pin.visible = at.place === "board";
-      const spawn = Math.min(1, Math.max(0, (now - card.born) / .38));
-      const bounce = Math.min(1, (now - card.popped) / .4);
-      const pop = (spawn < 1 ? easeBack(spawn) : 1) * (bounce < 1 ? 1 + Math.sin(bounce * Math.PI) * .22 : 1);
-      card.inner.scale.setScalar(Math.max(.001, pop));
+      member.root.position.y += lift;
+      let turnBy = facing - member.facing;
+      turnBy = Math.atan2(Math.sin(turnBy), Math.cos(turnBy));
+      member.facing += turnBy * (1 - Math.exp(-dt * 12));
+      member.root.rotation.y = member.facing;
+      // Carried people kick their feet; everyone else bobs gently
+      const kick = at.place === "hand" && !still;
+      member.feet.forEach((foot, side) => {
+        foot.position.y = .06 + (kick ? Math.max(0, Math.sin(now * 16 + side * Math.PI)) * .08 : 0);
+      });
+      member.body.rotation.z = kick ? Math.sin(now * 9) * .12 : 0;
+      member.head.rotation.z = still ? 0 : Math.sin(now * 2 + person.id) * .06;
+      // People waiting or being carried look up at the camera so their faces show
+      member.head.rotation.x = at.place === "tray" || at.place === "hand" ? -.35 : 0;
+      const spawn = Math.min(1, Math.max(0, (now - member.born) / .38));
+      const bounce = Math.min(1, (now - member.popped) / .4);
+      const pop = (spawn < 1 ? easeBack(spawn) : 1) * (bounce < 1 ? 1 + Math.sin(bounce * Math.PI) * .25 : 1);
+      member.root.scale.setScalar(.8 * Math.max(.001, pop));
     });
 
-    // Glow the board slot for any approved card being carried
-    const glowing = [...carried];
-    slotGlows.forEach((glow, i) => {
-      const index = glowing[i];
-      glow.visible = index !== undefined;
-      if (index === undefined) return;
-      const slot = slotOf(index);
-      glow.position.set(slot.x, slot.y, boardZ + .085);
-      (glow.material as T.MeshBasicMaterial).opacity = .55 + Math.sin(now * 8) * .25;
+    // Badges on the board, including ones falling off after a sick call
+    const rostered = roster(round);
+    badges.forEach((badge, slot) => {
+      const person = rostered[slot];
+      if (person) {
+        if (badge.person !== person.id) {
+          badge.person = person.id;
+          badge.surface.map = badgeTexture(person);
+          badge.surface.needsUpdate = true;
+        }
+        badge.falling = -10;
+        badge.group.visible = true;
+        badge.group.position.copy(badge.home);
+        badge.group.rotation.x = 0;
+        const bounce = Math.min(1, (now - badge.popped) / .4);
+        badge.inner.scale.setScalar(bounce < 1 ? easeBack(bounce) : 1);
+        return;
+      }
+      const fall = now - badge.falling;
+      if (badge.person >= 0 && fall < 1.1) {
+        badge.group.visible = true;
+        badge.group.position.set(badge.home.x, badge.home.y - fall * fall * 3.4, badge.home.z + fall * .9);
+        badge.group.rotation.x = -fall * 2.2;
+        badge.inner.scale.setScalar(Math.max(.001, 1 - Math.max(0, fall - .7) / .4));
+        return;
+      }
+      badge.person = -1;
+      badge.group.visible = false;
     });
+
+    // Glow the open shifts that suit anyone being carried, once they are signed on
+    const wanted = new Set(round.players.map(player => player.carrying).filter(person => person?.approved).map(person => person!.role));
+    slotGlows.forEach((glow, slot) => {
+      glow.visible = !rostered[slot] && wanted.has(shifts[slot].role) && round.phase === "playing";
+      if (glow.visible) (glow.material as T.MeshBasicMaterial).opacity = .55 + Math.sin(now * 8) * .25;
+    });
+
+    // Ring ring
+    const ringing = now < ringUntil && !still;
+    handset.position.y = .16 + (ringing ? Math.abs(Math.sin(now * 30)) * .08 : 0);
+    phone.rotation.z = ringing ? Math.sin(now * 40) * .08 : 0;
   }
 
   const highlightColour = new T.Color(0xfff2a0);
@@ -1047,15 +1177,15 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
       round.players.forEach(player => {
         const { position, carrying } = player;
         if (!carrying) {
-          if (nearStation(position, furniture.inbox) && round.requests.some(card => card.at.place === "tray")) lit.tray = true;
+          if (nearStation(position, furniture.inbox) && round.staff.some(person => person.at.place === "tray")) lit.tray = true;
           office.pass.forEach((pad, i) => {
-            if (near(position, pad) && round.requests.some(card => card.at.place === "counter" && card.at.pad === i)) lit.pads[i] = true;
+            if (near(position, pad) && round.staff.some(person => person.at.place === "counter" && person.at.pad === i)) lit.pads[i] = true;
           });
           return;
         }
         if (!carrying.approved && nearStation(position, furniture.desk)) lit.desk = true;
         const free = office.pass.map((pad, i) => ({ i, d: Math.hypot(pad.x - position.x, pad.z - position.z) }))
-          .filter(({ i, d }) => d <= settings.reach && !round.requests.some(card => card.at.place === "counter" && card.at.pad === i))
+          .filter(({ i, d }) => d <= settings.reach && !round.staff.some(person => person.at.place === "counter" && person.at.pad === i))
           .sort((a, b) => a.d - b.d)[0];
         if (free) lit.pads[free.i] = true;
       });
@@ -1118,7 +1248,9 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
       eyes.forEach(eye => eye.scale.y = blinking ? .12 : 1);
 
       critter.ring.scale.setScalar(1 + (moving ? 0 : Math.sin(now * 3 + i) * .04));
-      tags[i].position.set(player.position.x, player.carrying ? 2.95 : 2.25, player.position.z);
+      // While carrying, the person's own name tag sits where the player tag would be
+      tags[i].visible = !player.carrying;
+      tags[i].position.set(player.position.x, 2.25, player.position.z);
 
       if (moving && !still && now > critter.dustAt) {
         critter.dustAt = now + .16;
@@ -1130,7 +1262,7 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
       ring.group.visible = amount > 0;
       if (amount > 0) {
         ring.fill.geometry = ringSteps[Math.min(24, Math.round(amount * 24))];
-        ring.group.position.set(player.position.x, 3.15, player.position.z);
+        ring.group.position.set(player.position.x, 3.8, player.position.z);
         ring.group.quaternion.copy(camera.quaternion);
       }
     });
@@ -1158,7 +1290,7 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
     const still = reducedMotion.matches;
     track(round, now);
     animateCritters(round, now, dt);
-    placeCards(round, now, dt);
+    placePeople(round, now, dt);
     highlight(round, now);
 
     const anyStamping = round.players.some(player => player.stamping);
@@ -1198,7 +1330,7 @@ export function createOfficeWorld(host: HTMLDivElement, sound?: Sound) {
       if (!marker.visible) return;
       const player = round.players[i];
       const lift = still ? 0 : Math.abs(Math.sin(now * 5)) * .18;
-      marker.position.set(player.position.x, (player.carrying ? 3.75 : 2.75) + lift, player.position.z);
+      marker.position.set(player.position.x, (player.carrying ? 4.3 : 2.75) + lift, player.position.z);
     });
 
     const follow = T.MathUtils.clamp(round.players[focus ?? 0].position.x, -maxPan, maxPan);

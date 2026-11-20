@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useEffectEvent, useRef, useState, type PointerEvent } from "react";
+import { useEffect, useEffectEvent, useRef, useState, type CSSProperties, type PointerEvent } from "react";
 import { createOfficeWorld } from "./office-world";
 import {
-  beginRound, days, filledShifts, interact, newRound, nextAction, settings, shifts, stepRound, stopStamp, walk,
+  beginRound, days, filledShifts, interact, newRound, nextAction, roleOf, roster, settings, shifts, stepRound, stopStamp, walk,
   type Round,
 } from "./round";
 import { createSound, type Sound } from "./sound";
@@ -27,15 +27,47 @@ function snapshot(round: Round) {
     phase: round.phase,
     time: settings.duration - round.elapsed,
     filled: filledShifts(round),
-    slots: shifts.map((_, i) => round.requests[i]?.at.place === "board"),
+    slots: roster(round).map(person => person?.name ?? ""),
+    news: round.news.until > round.elapsed ? round.news.text : "",
     players: round.players.map((player, i) => ({
-      carrying: player.carrying ? shifts[player.carrying.shift].label : "",
+      carrying: player.carrying ? player.carrying.name : "",
+      colour: player.carrying ? roleOf(player.carrying.role).colour : "",
       approved: player.carrying?.approved ?? false,
       stamp: player.stamping ? (player.carrying?.stamp ?? 0) / settings.stampTime : 0,
       stamping: player.stamping,
       prompt: player.messageUntil > round.elapsed ? player.message : nextAction(round, i),
     })),
   };
+}
+
+function rosterText(slots: string[]) {
+  const line = (day: number) => [day, day + days.length]
+    .map(slot => `${shifts[slot].half} ${roleOf(shifts[slot].role).label}: ${slots[slot] || "open"}`).join(" · ");
+  return ["Shift Happens! roster", ...days.map((day, i) => `${day}  ${line(i)}`)].join("\n");
+}
+
+function RosterTable({ slots }: { slots: string[] }) {
+  return (
+    <table className="shifts-roster">
+      <thead><tr><th scope="col"><span className="sr-only">Shift</span></th>{days.map(day => <th key={day} scope="col">{day}</th>)}</tr></thead>
+      <tbody>
+        {(["AM", "PM"] as const).map((half, row) => (
+          <tr key={half}>
+            <th scope="row">{half}</th>
+            {days.map((day, i) => {
+              const slot = i + row * days.length;
+              const { colour, label } = roleOf(shifts[slot].role);
+              return (
+                <td key={day} data-open={!slots[slot]} style={{ "--role": colour } as CSSProperties} title={label}>
+                  {slots[slot] || "—"}
+                </td>
+              );
+            })}
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
 }
 
 export default function ShiftHappens() {
@@ -54,6 +86,11 @@ export default function ShiftHappens() {
   const [view, setView] = useState(() => snapshot(newRound()));
   const [graphics, setGraphics] = useState<"loading" | "ready" | "failed">("loading");
   const [muted, setMuted] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  function copyRoster(slots: string[]) {
+    navigator.clipboard?.writeText(rosterText(slots)).then(() => setCopied(true), () => setCopied(false));
+  }
 
   function press(code: string) {
     sound.current?.unlock();
@@ -189,6 +226,7 @@ export default function ShiftHappens() {
     active.current = 0;
     if (focus.current !== null) focus.current = 0;
     setLead(0);
+    setCopied(false);
     const state = newRound();
     beginRound(state);
     round.current = state;
@@ -263,18 +301,23 @@ export default function ShiftHappens() {
         {days.map((day, i) => (
           <div className="shifts-day" key={day}>
             <b>{day}</b>
-            {([i, i + days.length]).map(index => (
-              <span key={index} data-filled={view.slots[index]}
-                aria-label={`${shifts[index].label} ${view.slots[index] ? "covered" : "open"}`}>
-                <span>{shifts[index].half}</span>{view.slots[index] ? "✓" : "–"}
-              </span>
-            ))}
+            {([i, i + days.length]).map(index => {
+              const { colour, label } = roleOf(shifts[index].role);
+              const name = view.slots[index];
+              return (
+                <span key={index} data-filled={Boolean(name)} style={{ "--role": colour } as CSSProperties}
+                  aria-label={`${shifts[index].label}, ${label}: ${name || "open"}`}>
+                  <span>{shifts[index].half}</span><em>{name || label}</em>
+                </span>
+              );
+            })}
           </div>
         ))}
       </section>
 
       <section className={urgent ? "shifts-game shifts-game--urgent" : "shifts-game"} aria-label="Office">
         <div className="shifts-floor" ref={host} tabIndex={0} />
+        {view.phase === "playing" && view.news && <p className="shifts-news" role="status">📞 {view.news}</p>}
         {view.phase === "playing" && (
           <div className="shifts-touch" aria-label="Player 1 touch controls">
             <div className="shifts-stick" onPointerDown={stickDown} onPointerMove={stickMove}
@@ -289,7 +332,7 @@ export default function ShiftHappens() {
                 <small>Swap</small>
               </button>
               {solo.carrying && (
-                <b className={solo.approved ? "shifts-approved" : "shifts-request"}>{solo.carrying}{solo.approved ? " ✓" : ""}</b>
+                <b className="shifts-person" style={{ "--role": solo.colour } as CSSProperties}>{solo.carrying}{solo.approved ? " ✓" : ""}</b>
               )}
               <button type="button" onPointerDown={actionDown} onLostPointerCapture={() => release("Space")}
                 onPointerUp={() => release("Space")}>
@@ -306,15 +349,19 @@ export default function ShiftHappens() {
               ) : view.phase === "ready" ? (
                 <>
                   <h2>Cover the week</h2>
-                  <p>Grab requests from the inbox. Stamp them at the manager’s desk. Pass them over the counter and pin them to the roster.</p>
+                  <p>New staff are waiting. Sign them on at the manager’s desk, pass them over the counter and put each one on a shift that matches their role. Watch out for sick calls.</p>
                   <p className="shifts-tip">Playing alone? Swap between the duck and the bunny with <kbd>Q</kbd> or the swap button.</p>
                   <button disabled={graphics !== "ready"} onClick={start}>Start round</button>
                 </>
               ) : (
                 <>
-                  <h2>{view.phase === "won" ? "Fully rostered!" : "Understaffed"}</h2>
-                  <p>{view.phase === "won" ? `${clock(view.time)} to spare` : `${view.filled} of ${shifts.length} shifts covered`}</p>
-                  <button onClick={start}>Play again</button>
+                  <h2>{view.phase === "won" ? "Week covered!" : "Understaffed"}</h2>
+                  <p>{view.phase === "won" ? `Rostered with ${clock(view.time)} to spare.` : `${view.filled} of ${shifts.length} shifts covered.`}</p>
+                  <RosterTable slots={view.slots} />
+                  <div className="shifts-end-actions">
+                    <button type="button" className="shifts-copy" onClick={() => copyRoster(view.slots)}>{copied ? "Copied" : "Copy roster"}</button>
+                    <button onClick={start}>Play again</button>
+                  </div>
                 </>
               )}
             </div>
@@ -337,7 +384,7 @@ export default function ShiftHappens() {
                 </div>
                 {view.phase === "playing" && (
                   <div className="shifts-prompt">
-                    {player.carrying && <span className={player.approved ? "shifts-approved" : "shifts-request"}>{player.carrying}{player.approved ? " ✓" : ""}</span>}
+                    {player.carrying && <span className="shifts-person" style={{ "--role": player.colour } as CSSProperties}>{player.carrying}{player.approved ? " ✓" : ""}</span>}
                     <span>{player.stamping ? "Stamping…" : player.prompt}</span>
                   </div>
                 )}

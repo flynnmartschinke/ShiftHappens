@@ -6,7 +6,7 @@ A low-poly browser game about filling the Friday-night café roster. Play solo o
 
 ## Shift Happens! playtest
 
-After starting the local server, open `/shift-happens` for the separate office game. Two players share one keyboard. Player 1 uses **WASD** and **Space**. Player 2 uses the **arrow keys** and **Enter**. Hold the action key at the manager’s desk to approve a request, set it on a counter pad, then pick it up from the other side and pin it at the board. Fill all 14 weekly shifts before 2:00 runs out.
+After starting the local server, open `/shift-happens` for the separate office game. Two players share one keyboard. Player 1 uses **WASD** and **Space**. Player 2 uses the **arrow keys** and **Enter**. New staff wait at the table, each wearing a cap in their role colour (barista, kitchen or register). Grab someone, hold the action key at the manager’s desk to sign them on, pass them over the counter, then stand at a day on the board and roster them onto the shift that matches their role. Sick calls knock people off the board, so refill those shifts too. Cover all 14 weekly shifts before 3:00 runs out. The finished roster can be copied from the end screen.
 
 Playing alone? Press **Q**, or the swap button on a phone, to switch between the duck and the bunny. On a phone, Player 1 moves with the thumb stick and uses the round action button. The office lowers its detail automatically on slower devices. Add `?quality=high` or `?quality=low` to the address to fix the detail level.
 
