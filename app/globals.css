@@ -1,0 +1,103 @@
+:root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #11151c; color: #f4f6fb; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 280px; background: radial-gradient(ellipse at 50% 0%, #1d2840, #11151c 70%); min-height: 100vh; }
+main { max-width: 42rem; margin: 0 auto; padding: 2rem clamp(1rem, 6vw, 3rem) 3rem; }
+h1, h2, h3, p { margin: 0; }
+h1 { font-size: clamp(2rem, 8vw, 3rem); line-height: 1.06; letter-spacing: -.055em; margin: 2rem 0 1.25rem; }
+h2 { font-size: 1.4rem; letter-spacing: -.035em; margin: .2rem 0; }
+h3 { font-size: 1rem; }
+p { color: #c3c9d7; line-height: 1.45; }
+a { color: inherit; text-decoration: none; }
+.top, .card-top, footer { display: flex; justify-content: space-between; gap: 1rem; align-items: center; }
+.brand { display: flex; align-items: center; gap: .65rem; font-weight: 700; font-size: 1.15rem; }
+.brand span { background: #b7ebd0; color: #133529; display: grid; place-items: center; height: 2rem; width: 2rem; border-radius: .55rem; }
+.sample { font-size: .85rem; color: #aeb9cd; }
+nav { display: flex; gap: .3rem; margin-top: 2rem; width: fit-content; padding: .25rem; background: #171e2b; border: 1px solid #384257; border-radius: .8rem; }
+nav a { padding: .65rem .85rem; border-radius: .55rem; color: #bac5d9; font-size: .9rem; }
+nav [aria-current] { background: #35435b; color: white; }
+.card { padding: 1.3rem; border-radius: 1rem; background: #1c2636; border: 1px solid #39465e; }
+.card-top { align-items: flex-start; }
+.label { font-size: .875rem; }
+.status { border-radius: 1rem; background: #4d381e; color: #ffd99f; font-size: .82rem; padding: .35rem .55rem; white-space: nowrap; }
+.good { background: #1c3a32; color: #b7ebd0; }
+button { font: inherit; font-weight: 650; color: #172e26; background: #b7ebd0; border: 1px solid transparent; border-radius: .65rem; padding: .6rem .85rem; min-height: 44px; cursor: pointer; }
+button:hover:not(:disabled) { filter: brightness(1.12); }
+button:disabled { opacity: .55; cursor: wait; }
+button:focus-visible, a:focus-visible { outline: 2px solid #b7ebd0; outline-offset: 3px; }
+.card button, .card .result, .card .message { margin-top: 1.1rem; }
+.card button { width: 100%; }
+.message { color: #e2e8f4; background: #131b28; border-radius: .65rem; padding: .85rem; }
+.message.good { margin: 1rem 0; }
+.secondary { color: #e7efff; background: #29364d; border-color: #51617d; }
+.muted-link, .link-button { display: inline-flex; align-items: center; min-height: 44px; margin-top: .6rem; color: #c4d2ea; text-decoration: underline; text-underline-offset: 3px; }
+.link-button { padding-inline: 0; background: transparent; font-weight: 500; }
+.feedback { color: #ffd99f; }
+.feedback:empty { display: none; }
+footer { padding-top: 1rem; border-top: 1px solid #384257; margin-top: 2rem; color: #aeb9cd; font-size: .83rem; }
+footer a { text-decoration: underline; }
+
+.play-shell { max-width: 88rem; padding-top: 1.3rem; }
+.play-shell > nav { margin-top: .85rem; }
+.cafe-game { margin-top: 1.05rem; }
+.cafe-heading { display: flex; align-items: end; gap: clamp(.65rem, 2vw, 1.3rem); margin: 0 0 .8rem; }
+.cafe-heading > div:first-child { margin-right: auto; }
+.cafe-heading h1 { margin: .25rem 0 0; letter-spacing: -.065em; font-size: clamp(2.15rem, 5vw, 4.25rem); line-height: .94; }
+.cafe-heading p { color: #b8eacf; font-size: .86rem; font-weight: 700; }
+.rush-score { min-width: 5.2rem; display: grid; gap: .2rem; padding: .5rem .7rem; border-radius: .7rem; background: #243147; }
+.rush-score span { color: #c4cee1; font-size: .76rem; }
+.rush-score strong { font-size: clamp(1.25rem, 3vw, 1.65rem); line-height: 1; }
+.rush-score small { color: #becbe0; font-size: .83rem; }
+.rush-score--late { background: #763f42; }
+.cafe-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(13rem, 16rem); gap: 1rem; align-items: start; }
+.cafe-frame { position: relative; border-radius: .9rem; overflow: hidden; box-shadow: 0 16px 42px #07091480; background: #735b87; }
+.cafe-viewport { width: 100%; aspect-ratio: 1.55; min-height: 15rem; outline-offset: -3px; }
+.cafe-viewport canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.cafe-overlay { position: absolute; inset: 0; display: grid; align-items: end; justify-items: center; padding: .75rem; pointer-events: none; background: linear-gradient(transparent 42%, #25163b99); }
+.cafe-overlay > div { background: #191b30ed; border: 1px solid #e2c5ff57; color: #fcf4ff; border-radius: .8rem; padding: .9rem 1.1rem; text-align: center; pointer-events: auto; max-width: 25rem; }
+.cafe-overlay h2 { font-size: clamp(1.15rem, 3vw, 1.55rem); }
+.cafe-overlay p { margin: .25rem 0 .65rem; font-size: .9rem; }
+.cafe-overlay button { min-width: 8rem; }
+.cafe-stations { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)) minmax(6rem,1.1fr); gap: .45rem; margin-top: .65rem; }
+.station-control { display: flex; align-items: center; justify-content: space-between; gap: .3rem; padding: .5rem .65rem; }
+.station-control strong { font-size: 1.05rem; }
+.station-control--0 { background: #e7cdff; color: #312343; }
+.station-control--1 { background: #ffd0a9; color: #432c29; }
+.station-control--2 { background: #b9f0da; color: #19352d; }
+.station-control--near { outline: 2px solid white; outline-offset: -4px; }
+.station-action { background: #27364f; color: #edf4ff; }
+.cafe-keys { color: #b4c3d9; font-size: .84rem; margin-top: .5rem; }
+.cafe-roster { padding: .9rem; border: 1px solid #354257; border-radius: .85rem; background: #1c2636; }
+.cafe-roster h2 { margin-bottom: .4rem; }
+.crew-row { display: flex; gap: .55rem; align-items: center; padding: .6rem 0; border-bottom: 1px solid #354257; }
+.crew-row div { display: grid; gap: .1rem; }
+.crew-row div span { font-size: .85rem; color: #bfcae0; }
+.crew-dot { width: 1rem; height: 1rem; border-radius: .23rem; flex: 0 0 auto; }
+.crew-dot--sam { background: #d7b4ff; }
+.crew-dot--jo { background: #ffd0a9; }
+.crew-dot--away { background: #f099ae; }
+.cafe-radio { margin-top: .7rem; background: #131a29; padding: .63rem; border-radius: .5rem; font-size: .89rem; }
+.crew-actions { display: grid; gap: .45rem; margin-top: .65rem; }
+.crew-actions button:first-child { background: #34435e; color: #f2f6ff; }
+.cafe-event { margin-top: .7rem; color: #ffddaa; font-size: .9rem; }
+@media(max-width: 52rem) { .cafe-layout { grid-template-columns: minmax(0,1fr); } .cafe-roster { display: grid; grid-template-columns: 1fr 1fr; gap: .3rem .75rem; } .cafe-roster h2, .cafe-radio, .cafe-event { grid-column: 1/-1; } .crew-actions { grid-column: 1/-1; grid-template-columns: 1fr 1fr; } }
+@media(max-width: 30rem) { .station-control { padding-inline: .3rem; font-size: .85rem; } .station-action { padding-inline: .35rem; font-size: .83rem; } .cafe-viewport { min-height: 12rem; } .rush-score { min-width: 3.6rem; } }
+.cafe-stations--roster { grid-template-columns: repeat(4, minmax(0,1fr)) minmax(8.4rem,1.55fr); }
+.station-control--3 { background: #ffd0a9; color: #432c29; }
+.station-control--4 { background: #b9f0da; color: #19352d; }
+.crew-dot--rae { background: #b9f0da; }
+.shift-time { font-size: .86rem; }
+.play-again { display: inline-flex; padding: .6rem 1rem; border-radius: .6rem; color: #172e26; background: #b7ebd0; font-weight: 650; }
+@media(max-width: 52rem) { .shift-time { grid-column: 1/-1; } }
+@media(max-width: 30rem) { .cafe-stations--roster { grid-template-columns: repeat(4,minmax(0,1fr)); } .cafe-stations--roster .station-action { grid-column: 1/-1; } }
+.cafe-stations--roster { grid-template-columns: repeat(6,minmax(0,1fr)) minmax(8rem,1.6fr); }
+.station-control--3, .station-control--6 { background: #ffe7a3; color: #433422; }
+.station-control--4 { background: #ffd0a9; color: #432c29; }
+.station-control--5 { background: #b9f0da; color: #19352d; }
+.crew-dot--station-0 { background: #ffd0a9; }
+.crew-dot--station-1 { background: #b9f0da; }
+.crew-dot--station-2 { background: #ffe7a3; }
+.undo-shift { margin-left: auto; color: #cdddff; background: #2a3953; padding: .3rem .5rem; min-height: 38px; }
+@media(max-width: 52rem) {
+  .cafe-stations--roster { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  .cafe-stations--roster .station-action { grid-column: 1/-1; }
+}
