@@ -8,6 +8,8 @@ A low-poly browser game about filling the Friday-night café roster. Play solo o
 
 After starting the local server, open `/shift-happens` for the separate office game. Two players share one keyboard. Player 1 uses **WASD** and **Space**. Player 2 uses the **arrow keys** and **Enter**. Hold the action key at the manager’s desk to approve a request, set it on a counter pad, then pick it up from the other side and pin it at the board. Fill all 14 weekly shifts before 2:00 runs out.
 
+On a phone, Player 1 moves with the thumb stick and uses the round action button. The office lowers its detail automatically on slower devices. Add `?quality=high` or `?quality=low` to the address to fix the detail level.
+
 ### Publish the shared-keyboard demo
 
 Run `npm run build:demo` to generate the static site in `out/shift-happens`. You can serve that directory with any static web host.
